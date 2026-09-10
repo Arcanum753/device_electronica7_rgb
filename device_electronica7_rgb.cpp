@@ -15,10 +15,9 @@
 // Глобальные объекты и переменные
 // ============================================================
 
-CLASS_DEVICE_E7RGB device_electronica7_rgb(false);
+CLASS_DEVICE_E7RGB device_electronica7_rgb;
 
-CLASS_DEVICE_E7RGB::CLASS_DEVICE_E7RGB(bool _in) {
-    dumb = _in;
+CLASS_DEVICE_E7RGB::CLASS_DEVICE_E7RGB() {
     _fs = NULL;
     _lastMinute = 0xFF;
     _ntpWasSynced = false;
@@ -30,6 +29,22 @@ CLASS_DEVICE_E7RGB::CLASS_DEVICE_E7RGB(bool _in) {
     _animPhase = 0.0f;
     _fxLap = 0;
     for (int i = 0; i < E7_FX_MAX_COLORS; i++) { _fxOrder[i] = (uint8_t)i; }
+
+    _view = E7_VIEW_NORMAL;
+    _curH = 0; _curM = 0;
+    _prevH = 0; _prevM = 0;
+    _transType = E7_TFX_OFF;
+    _transStartMs = 0;
+    _settleStartMs = 0;
+    _rainStartMs = 0;
+    _rainRampStartMs = 0;
+    _fxAccumMs = 0;
+    for (int i = 0; i < E7_WIDTH; i++) {
+        _rainHead[i] = 0.0f;
+        _rainSpeed[i] = 0.0f;
+        _rainColOn[i] = false;
+    }
+    memset(_transRand, 0, sizeof(_transRand));
 }
 
 // Forward-объявления свободных функций, используемых в шаблонном блоке
@@ -40,6 +55,7 @@ static String e7TimeHhMm();
 static uint32_t e7HexStringToUint32(const String& hexStr);
 static String e7HexColor(uint32_t c);
 static bool e7FontPathOk(const String& p);
+static bool e7TfxFreqOk(int f);
 
 // ============================================================
 // setFs()
@@ -64,17 +80,30 @@ void CLASS_DEVICE_E7RGB::begin() {
     for (int i = 0; i < E7_FX_MAX_COLORS; i++) { _fxOrder[i] = (uint8_t)i; }
     e7SeedRng();
 
+    _view = E7_VIEW_NORMAL;
+    _curH = 0; _curM = 0;
+    _prevH = 0; _prevM = 0;
+    _transType = E7_TFX_OFF;
+    _settleStartMs = 0;
+    _fxAccumMs = 0;
+    memset(_transRand, 0, sizeof(_transRand));
+
     defaultConfig();
     if (loadConfig() == false) { saveConfig(); }
 
     if (_fs != NULL) { loadFont(); }
 
     initMatrix();
-    applyMode();
 
     _animPhase = 0.0f;
+    if (_config.mode == E7_MODE_WORK && _config.rainEnabled == 1 && NTP.getLastNTPSync() == 0) {
+        startRain();
+    } else {
+        applyMode();
+    }
+
     SetTimerTask(e7rgbSecondTask, 1000);
-    SetTimerTask(e7rgbAnimTask, E7RGB_ANIM_MS);
+    SetTimerTask(e7rgbAnimTask, E7_FX_RENDER_MS);
 }
 
 void CLASS_DEVICE_E7RGB::begin(ModContext& ctx) {
@@ -137,6 +166,14 @@ void CLASS_DEVICE_E7RGB::handleInfo(AsyncWebServerRequest *request) {
     values += "layout|"        + String(_config.layout)        + "|input\n";
     values += "fontFile|"      + _config.fontFile              + "|input\n";
     values += "manualText|"    + _config.manualText            + "|input\n";
+    values += "timeFx|"        + String(_config.timeFx)        + "|input\n";
+    values += "timeFxFreq|"    + String(_config.timeFxFreq)    + "|input\n";
+    values += "timeFxDur|"     + String(_config.timeFxDur)     + "|input\n";
+    values += "timeFxBg|"      + String(_config.timeFxBg)      + "|input\n";
+    values += "rainEnabled|"   + String(_config.rainEnabled)   + "|input\n";
+    values += "rainDurMin|"    + String(_config.rainDurMin)    + "|input\n";
+    values += "rainIntensity|" + String(_config.rainIntensity) + "|input\n";
+    values += "rainSettleDur|" + String(_config.rainSettleDur) + "|input\n";
 
     bool synced = (NTP.getLastNTPSync() > 0);
     values += "x_ntp_sync|"    + String(synced ? 1 : 0)        + "|div\n";
@@ -233,6 +270,40 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
             _config.manualText = out;
             continue;
         }
+        if (name == "timeFx") {
+            _config.timeFx = (uint8_t)constrain(val.toInt(), 0, E7_TFX_COUNT - 1);
+            continue;
+        }
+        if (name == "timeFxFreq") {
+            int f = val.toInt();
+            if (e7TfxFreqOk(f) == false) { f = E7_TFX_FREQ_DEFAULT; }
+            _config.timeFxFreq = (uint8_t)f;
+            continue;
+        }
+        if (name == "timeFxDur") {
+            _config.timeFxDur = (uint8_t)constrain(val.toInt(), 1, 10);
+            continue;
+        }
+        if (name == "timeFxBg") {
+            _config.timeFxBg = (uint8_t)constrain(val.toInt(), 0, 10);
+            continue;
+        }
+        if (name == "rainEnabled") {
+            _config.rainEnabled = (uint8_t)constrain(val.toInt(), 0, 1);
+            continue;
+        }
+        if (name == "rainDurMin") {
+            _config.rainDurMin = (uint8_t)constrain(val.toInt(), 1, 10);
+            continue;
+        }
+        if (name == "rainIntensity") {
+            _config.rainIntensity = (uint8_t)constrain(val.toInt(), 1, 10);
+            continue;
+        }
+        if (name == "rainSettleDur") {
+            _config.rainSettleDur = (uint8_t)constrain(val.toInt(), 0, 10);
+            continue;
+        }
     }
 
     if (_pendingReinit) {
@@ -283,6 +354,18 @@ void CLASS_DEVICE_E7RGB::deferredApplyTask() {
     if (d._fs != NULL) { d.loadFont(); }
 
     if (d._pendingApply) {
+        // Скорректировать состояние отображения под изменённые настройки
+        bool synced = (NTP.getLastNTPSync() > 0);
+        if (d._config.mode != E7_MODE_WORK) {
+            d._view = E7_VIEW_NORMAL;
+        } else if (d._config.rainEnabled == 0 &&
+                   (d._view == E7_VIEW_RAIN || d._view == E7_VIEW_SETTLE)) {
+            d._view = E7_VIEW_NORMAL;
+            d._forceRedraw = true;
+            d._lastMinute = (uint8_t)minute();
+        } else if (d._config.rainEnabled == 1 && d._view == E7_VIEW_NORMAL && synced == false) {
+            d.startRain();
+        }
         d.applyMode();
         d._pendingApply = false;
     }
@@ -314,6 +397,14 @@ void CLASS_DEVICE_E7RGB::defaultConfig() {
     _config.origin      = E7_ORIGIN_BOTTOM_LEFT;   // спаянная матрица: первый LED внизу слева
     _config.direction   = E7_DIR_UP;               // порядок: снизу вверх, слева направо
     _config.layout      = E7_LAYOUT_PARALLEL;      // развёртка: параллельно (по умолчанию)
+    _config.timeFx      = E7_TFX_FADE;
+    _config.timeFxFreq  = E7_TFX_FREQ_DEFAULT;
+    _config.timeFxDur   = 2;
+    _config.timeFxBg    = 3;
+    _config.rainEnabled = 1;
+    _config.rainDurMin  = 2;
+    _config.rainIntensity = 6;
+    _config.rainSettleDur = 1;
     _config.fontFile    = E7_FONT_DEFAULT;
     _config.manualText  = "0000";
 }
@@ -343,6 +434,35 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     _config.origin      = (uint8_t)constrain(doc["origin"].as<int>(), 0, 3);
     _config.direction   = (uint8_t)constrain(doc["direction"].as<int>(), 0, 3);
     _config.layout      = (uint8_t)constrain(doc["layout"].as<int>(), 0, 1);
+
+    // Новые поля читаем только при наличии ключа: у старых конфигов их нет,
+    // поэтому должны сохраниться значения из defaultConfig().
+    if (doc["timeFx"].is<int>()) {
+        _config.timeFx = (uint8_t)constrain(doc["timeFx"].as<int>(), 0, E7_TFX_COUNT - 1);
+    }
+    if (doc["timeFxFreq"].is<int>()) {
+        int f = doc["timeFxFreq"].as<int>();
+        if (e7TfxFreqOk(f) == false) { f = E7_TFX_FREQ_DEFAULT; }
+        _config.timeFxFreq = (uint8_t)f;
+    }
+    if (doc["timeFxDur"].is<int>()) {
+        _config.timeFxDur = (uint8_t)constrain(doc["timeFxDur"].as<int>(), 1, 10);
+    }
+    if (doc["timeFxBg"].is<int>()) {
+        _config.timeFxBg = (uint8_t)constrain(doc["timeFxBg"].as<int>(), 0, 10);
+    }
+    if (doc["rainEnabled"].is<int>()) {
+        _config.rainEnabled = (uint8_t)constrain(doc["rainEnabled"].as<int>(), 0, 1);
+    }
+    if (doc["rainDurMin"].is<int>()) {
+        _config.rainDurMin = (uint8_t)constrain(doc["rainDurMin"].as<int>(), 1, 10);
+    }
+    if (doc["rainIntensity"].is<int>()) {
+        _config.rainIntensity = (uint8_t)constrain(doc["rainIntensity"].as<int>(), 1, 10);
+    }
+    if (doc["rainSettleDur"].is<int>()) {
+        _config.rainSettleDur = (uint8_t)constrain(doc["rainSettleDur"].as<int>(), 0, 10);
+    }
 
     _config.fontFile = doc["fontFile"].as<String>();
     if (e7FontPathOk(_config.fontFile) == false) { _config.fontFile = E7_FONT_DEFAULT; }
@@ -381,6 +501,14 @@ bool CLASS_DEVICE_E7RGB::saveConfig() {
     doc["origin"]      = _config.origin;
     doc["direction"]   = _config.direction;
     doc["layout"]      = _config.layout;
+    doc["timeFx"]        = _config.timeFx;
+    doc["timeFxFreq"]    = _config.timeFxFreq;
+    doc["timeFxDur"]     = _config.timeFxDur;
+    doc["timeFxBg"]      = _config.timeFxBg;
+    doc["rainEnabled"]   = _config.rainEnabled;
+    doc["rainDurMin"]    = _config.rainDurMin;
+    doc["rainIntensity"] = _config.rainIntensity;
+    doc["rainSettleDur"] = _config.rainSettleDur;
     doc["fontFile"]    = _config.fontFile;
     doc["manualText"]  = _config.manualText;
 
@@ -439,6 +567,11 @@ static String e7HexColor(uint32_t c) {
     char hex[8];
     snprintf(hex, sizeof(hex), "#%06X", (unsigned int)(c & 0xFFFFFF));
     return String(hex);
+}
+
+// Допустимая кратность минут для эффекта смены времени
+static bool e7TfxFreqOk(int f) {
+    return (f == 1 || f == 3 || f == 5 || f == 10 || f == 15 || f == 20 || f == 40);
 }
 
 static uint32_t e7HexStringToUint32(const String& hexStr) {
@@ -598,8 +731,12 @@ void CLASS_DEVICE_E7RGB::applyMode() {
     // origin/direction/layout из веб-настроек вступают в силу сразу.
     _matrix.setTopology(_config.origin, _config.direction, _config.layout);
     if (_config.mode == E7_MODE_WORK) {
+        if (_view == E7_VIEW_RAIN)      { drawRain(false, 0.0f, NULL); return; }
+        if (_view == E7_VIEW_SETTLE)    { drawSettle(); return; }
+        if (_view == E7_VIEW_TRANS)     { drawTransition(); return; }
         redrawFrame();
     } else {
+        _view = E7_VIEW_NORMAL;
         renderManual();
     }
 }
@@ -616,67 +753,344 @@ void CLASS_DEVICE_E7RGB::redrawFrame() {
 
 void CLASS_DEVICE_E7RGB::renderDigits(uint8_t h, uint8_t m) {
     if (_matrix.ready() == false) { return; }
-    _matrix.clear();
-    uint8_t digits[4];
-    digits[0] = h / 10;
-    digits[1] = h % 10;
-    digits[2] = m / 10;
-    digits[3] = m % 10;
-    for (uint8_t d = 0; d < 4; d++) {
-        char ch = (char)('0' + (digits[d] % 10));
-        drawGlyphAt((uint8_t)(d * E7_GLYPH_W), _fonts.glyph(ch));
-    }
-    _matrix.show();
+    _curH = h;
+    _curM = m;
+    uint8_t mask[E7_HEIGHT][E7_WIDTH];
+    buildTimeMask(h, m, mask);
+    drawMaskFx(mask);
 }
 
 void CLASS_DEVICE_E7RGB::renderNoTime() {
     if (_matrix.ready() == false) { return; }
-    _matrix.clear();
+    uint8_t mask[E7_HEIGHT][E7_WIDTH];
+    memset(mask, 0, sizeof(mask));
     for (uint8_t d = 0; d < 4; d++) {
-        drawGlyphAt((uint8_t)(d * E7_GLYPH_W), _fonts.glyph('-'));
+        blitGlyph((uint8_t)(d * E7_GLYPH_W), _fonts.glyph('-'), mask);
     }
-    _matrix.show();
+    drawMaskFx(mask);
 }
 
 // Ручной режим: показывает 4 символа из _config.manualText
 // ('0'..'9', '-' = прочерк, ' ' = пусто) для визуальной проверки цифр/шрифта.
 void CLASS_DEVICE_E7RGB::renderManual() {
     if (_matrix.ready() == false) { return; }
-    _matrix.clear();
+    uint8_t mask[E7_HEIGHT][E7_WIDTH];
+    memset(mask, 0, sizeof(mask));
     for (uint8_t d = 0; d < 4; d++) {
         char ch = (d < _config.manualText.length()) ? _config.manualText.charAt(d) : ' ';
         if (ch == ' ') { continue; }
-        drawGlyphAt((uint8_t)(d * E7_GLYPH_W), _fonts.glyph(ch));
+        blitGlyph((uint8_t)(d * E7_GLYPH_W), _fonts.glyph(ch), mask);
     }
-    _matrix.show();
+    drawMaskFx(mask);
 }
 
-void CLASS_DEVICE_E7RGB::drawGlyphAt(uint8_t x0, const uint8_t* mask) {
-    if (mask == NULL) { return; }
-    // Маска хранится как [ряд][колонка] значениями 0/1 (см. e7rgb_font.h);
-    // ряд 0 = верх глифа -> верх панели (y = E7_HEIGHT - 1).
-    // Цвет каждой lit-клетки определяется текущим спецэффектом.
+// Наложить глиф в логическую маску: ряд 0 глифа = верх панели (y = E7_HEIGHT-1)
+void CLASS_DEVICE_E7RGB::blitGlyph(uint8_t x0, const uint8_t* glyph, uint8_t mask[E7_HEIGHT][E7_WIDTH]) {
+    if (glyph == NULL) { return; }
     for (int r = 0; r < E7_GLYPH_H; r++) {
         for (int c = 0; c < E7_GLYPH_W; c++) {
-            if (mask[r * E7_GLYPH_W + c]) {
-                int px = (int)x0 + c;
-                int py = (E7_HEIGHT - 1) - r;
-                uint32_t color = e7FxColor(_config, px, py, _animPhase, _fxOrder);
-                _matrix.setPixel(px, py, color, _config.brightness);
+            if (glyph[r * E7_GLYPH_W + c] == 0) { continue; }
+            int px = (int)x0 + c;
+            int py = (E7_HEIGHT - 1) - r;   // логический y: 0 = низ
+            if (px >= 0 && px < E7_WIDTH && py >= 0 && py < E7_HEIGHT) {
+                mask[py][px] = 1;
             }
         }
     }
 }
 
 // ============================================================
-// Периодическая задача анимации эффектов (main-loop).
-// Двигает фазу и перерисовывает кадр для динамических эффектов
-// (радуга, динамический градиент). Show() безопасен: loop-контекст.
+// Переходы смены времени
+// ============================================================
+
+void CLASS_DEVICE_E7RGB::buildTimeMask(uint8_t h, uint8_t m, uint8_t mask[E7_HEIGHT][E7_WIDTH]) {
+    memset(mask, 0, (size_t)(E7_HEIGHT * E7_WIDTH));
+    uint8_t digits[4];
+    digits[0] = (uint8_t)(h / 10);
+    digits[1] = (uint8_t)(h % 10);
+    digits[2] = (uint8_t)(m / 10);
+    digits[3] = (uint8_t)(m % 10);
+    for (uint8_t d = 0; d < 4; d++) {
+        char ch = (char)('0' + (digits[d] % 10));
+        blitGlyph((uint8_t)(d * E7_GLYPH_W), _fonts.glyph(ch), mask);
+    }
+}
+
+// Вывести один пиксель с пер-пиксельным масштабом уровня (0..1)
+void CLASS_DEVICE_E7RGB::compositePixel(int x, int y, uint32_t rgb, float level) {
+    if (level <= 0.003f) { return; }
+    if (level > 1.0f) { level = 1.0f; }
+    uint8_t b = (uint8_t)((float)_config.brightness * level);
+    _matrix.setPixel(x, y, rgb, b);
+}
+
+void CLASS_DEVICE_E7RGB::drawMaskFx(const uint8_t mask[E7_HEIGHT][E7_WIDTH]) {
+    if (_matrix.ready() == false) { return; }
+    _matrix.clear();
+    for (int y = 0; y < E7_HEIGHT; y++) {
+        for (int x = 0; x < E7_WIDTH; x++) {
+            if (mask[y][x] == 0) { continue; }
+            uint32_t color = e7FxColor(_config, x, y, _animPhase, _fxOrder);
+            compositePixel(x, y, color, 1.0f);
+        }
+    }
+    _matrix.show();
+}
+
+void CLASS_DEVICE_E7RGB::startTransition(uint8_t h, uint8_t m) {
+    _prevH = _curH;
+    _prevM = _curM;
+    _curH = h;
+    _curM = m;
+    _transType = _config.timeFx;
+    _transStartMs = millis();
+    for (int y = 0; y < E7_HEIGHT; y++) {
+        for (int x = 0; x < E7_WIDTH; x++) {
+            _transRand[y][x] = (uint8_t)(e7Rand() % 255);
+        }
+    }
+    _view = E7_VIEW_TRANS;
+    drawTransition();
+}
+
+// Выборка пикселя для сдвига вверх (новое выезжает снизу):
+// общая логика для E7_TFX_SLIDE_UP и E7_TFX_DIGIT_SLIDE
+static float e7SampleSlideUp(const float prevFrame[E7_HEIGHT][E7_WIDTH],
+                             const float curFrame[E7_HEIGHT][E7_WIDTH],
+                             int x, int y, int off) {
+    if (y < off) {
+        int sy = y + (E7_HEIGHT - off);
+        return (sy >= 0 && sy < E7_HEIGHT) ? curFrame[sy][x] : 0.0f;
+    }
+    int sy = y - off;
+    return (sy >= 0) ? prevFrame[sy][x] : 0.0f;
+}
+
+void CLASS_DEVICE_E7RGB::drawTransition() {
+    if (_matrix.ready() == false) { return; }
+    uint8_t prevMask[E7_HEIGHT][E7_WIDTH];
+    uint8_t curMask[E7_HEIGHT][E7_WIDTH];
+    buildTimeMask(_prevH, _prevM, prevMask);
+    buildTimeMask(_curH, _curM, curMask);
+
+    uint32_t dur = (uint32_t)_config.timeFxDur * 1000u;
+    if (dur == 0) { dur = 1000u; }
+    float t = (float)(millis() - _transStartMs) / (float)dur;
+    if (t < 0.0f) { t = 0.0f; }
+    if (t > 1.0f) { t = 1.0f; }
+
+    // Фоновая заливка всего поля: плавный разгон в начале (~10%) и
+    // гашение в конце (~25%), чтобы к финалу остались только цифры.
+    float bgLevel = (float)(_config.timeFxBg > 10 ? 10 : _config.timeFxBg) / 10.0f;
+    float bgFade = 1.0f;
+    if (t < 0.10f)      { bgFade = t / 0.10f; }
+    else if (t > 0.75f) { bgFade = (1.0f - t) / 0.25f; }
+    if (bgFade < 0.0f) { bgFade = 0.0f; }
+    if (bgFade > 1.0f) { bgFade = 1.0f; }
+    float bg = bgLevel * bgFade;
+
+    // Кадры перехода: цифры на полной яркости, всё остальное поле — фон
+    float prevFrame[E7_HEIGHT][E7_WIDTH];
+    float curFrame[E7_HEIGHT][E7_WIDTH];
+    for (int y = 0; y < E7_HEIGHT; y++) {
+        for (int x = 0; x < E7_WIDTH; x++) {
+            prevFrame[y][x] = prevMask[y][x] ? 1.0f : bg;
+            curFrame[y][x] = curMask[y][x] ? 1.0f : bg;
+        }
+    }
+
+    _matrix.clear();
+    for (int y = 0; y < E7_HEIGHT; y++) {
+        for (int x = 0; x < E7_WIDTH; x++) {
+            float level = 0.0f;
+            bool white = false;
+            switch (_transType) {
+                case E7_TFX_FADE: {
+                    if (t < 0.5f) { level = prevFrame[y][x] * (1.0f - 2.0f * t); }
+                    else          { level = curFrame[y][x]  * (2.0f * t - 1.0f); }
+                } break;
+                case E7_TFX_WIPE_H:
+                    level = (x < (int)(t * E7_WIDTH)) ? curFrame[y][x] : prevFrame[y][x];
+                    break;
+                case E7_TFX_WIPE_V:
+                    // сверху вниз: верхние строки переключаются первыми
+                    level = (y >= E7_HEIGHT - (int)(t * E7_HEIGHT)) ? curFrame[y][x] : prevFrame[y][x];
+                    break;
+                case E7_TFX_DISSOLVE:
+                    level = (_transRand[y][x] < (uint8_t)(t * 255.0f)) ? curFrame[y][x] : prevFrame[y][x];
+                    break;
+                case E7_TFX_SLIDE_UP: {
+                    int off = (int)(t * E7_HEIGHT + 0.5f);
+                    level = e7SampleSlideUp(prevFrame, curFrame, x, y, off);
+                } break;
+                case E7_TFX_SLIDE_DOWN: {
+                    int off = (int)(t * E7_HEIGHT + 0.5f);
+                    if (y >= E7_HEIGHT - off) {
+                        int sy = y - (E7_HEIGHT - off);
+                        level = (sy >= 0 && sy < E7_HEIGHT) ? curFrame[sy][x] : 0.0f;
+                    } else {
+                        int sy = y + off;
+                        level = (sy < E7_HEIGHT) ? prevFrame[sy][x] : 0.0f;
+                    }
+                } break;
+                case E7_TFX_SLIDE_LEFT: {
+                    int off = (int)(t * E7_WIDTH + 0.5f);
+                    if (x >= E7_WIDTH - off) {
+                        int sx = x - (E7_WIDTH - off);
+                        level = (sx >= 0 && sx < E7_WIDTH) ? curFrame[y][sx] : 0.0f;
+                    } else {
+                        int sx = x + off;
+                        level = (sx < E7_WIDTH) ? prevFrame[y][sx] : 0.0f;
+                    }
+                } break;
+                case E7_TFX_SLIDE_RIGHT: {
+                    int off = (int)(t * E7_WIDTH + 0.5f);
+                    if (x < off) {
+                        int sx = x + (E7_WIDTH - off);
+                        level = (sx >= 0 && sx < E7_WIDTH) ? curFrame[y][sx] : 0.0f;
+                    } else {
+                        int sx = x - off;
+                        level = (sx >= 0) ? prevFrame[y][sx] : 0.0f;
+                    }
+                } break;
+                case E7_TFX_FLASH: {
+                    if (t < 0.45f)      { level = prevFrame[y][x]; }
+                    else if (t < 0.65f) { white = true; level = 1.0f; }
+                    else                { level = curFrame[y][x]; }
+                } break;
+                case E7_TFX_DIGIT_FADE: {
+                    int d = x / E7_GLYPH_W;
+                    float seg = 1.0f / 4.0f;
+                    float local = (t - (float)d * seg) / seg;
+                    if (local <= 0.0f)      { level = prevFrame[y][x]; }
+                    else if (local >= 1.0f) { level = curFrame[y][x]; }
+                    else if (local < 0.5f)  { level = prevFrame[y][x] * (1.0f - 2.0f * local); }
+                    else                    { level = curFrame[y][x]  * (2.0f * local - 1.0f); }
+                } break;
+                case E7_TFX_DIGIT_SLIDE: {
+                    int d = x / E7_GLYPH_W;
+                    float seg = 1.0f / 4.0f;
+                    float local = (t - (float)d * seg) / seg;
+                    if (local <= 0.0f)      { level = prevFrame[y][x]; }
+                    else if (local >= 1.0f) { level = curFrame[y][x]; }
+                    else {
+                        int off = (int)(local * E7_HEIGHT + 0.5f);
+                        level = e7SampleSlideUp(prevFrame, curFrame, x, y, off);
+                    }
+                } break;
+                default:
+                    level = curFrame[y][x];
+                    break;
+            }
+            if (level <= 0.0f) { continue; }
+            uint32_t color = white ? 0xFFFFFF : e7FxColor(_config, x, y, _animPhase, _fxOrder);
+            compositePixel(x, y, color, level);
+        }
+    }
+    _matrix.show();
+}
+
+// ============================================================
+// «Дождь»: заставка до синхронизации NTP и оседание в цифры
+// ============================================================
+
+void CLASS_DEVICE_E7RGB::startRain() {
+    _view = E7_VIEW_RAIN;
+    _rainStartMs = millis();
+    _rainRampStartMs = _rainStartMs;
+    int activeTarget = ((int)_config.rainIntensity * E7_WIDTH) / 10;
+    if (activeTarget < 1) { activeTarget = 1; }
+    if (activeTarget > E7_WIDTH) { activeTarget = E7_WIDTH; }
+    for (int i = 0; i < E7_WIDTH; i++) {
+        _rainHead[i] = (float)(e7Rand() % (E7_HEIGHT + 3));
+        _rainSpeed[i] = 0.35f + 0.05f * (float)_config.rainIntensity;
+        _rainColOn[i] = false;
+    }
+    // Равномерно распределяем активные столбцы по ширине матрицы
+    for (int k = 0; k < activeTarget; k++) {
+        int col = (k * E7_WIDTH) / activeTarget;
+        if (col >= E7_WIDTH) { col = E7_WIDTH - 1; }
+        _rainColOn[col] = true;
+    }
+    drawRain(false, 0.0f, NULL);
+}
+
+void CLASS_DEVICE_E7RGB::drawRain(bool settleMode, float settleP, const uint8_t target[E7_HEIGHT][E7_WIDTH]) {
+    if (_matrix.ready() == false) { return; }
+    float levels[E7_HEIGHT][E7_WIDTH];
+    memset(levels, 0, sizeof(levels));
+
+    float ramp = (float)(millis() - _rainRampStartMs) / (float)E7_RAIN_RAMP_MS;
+    if (ramp < 0.0f) { ramp = 0.0f; }
+    if (ramp > 1.0f) { ramp = 1.0f; }
+    if (settleP < 0.0f) { settleP = 0.0f; }
+    if (settleP > 1.0f) { settleP = 1.0f; }
+
+    float rainMul = settleMode ? (1.0f - settleP) : 1.0f;
+    float digitMul = settleMode ? settleP : 0.0f;
+
+    float dtTicks = (float)E7_FX_RENDER_MS / 50.0f;
+    int trail = 2 + ((int)_config.rainIntensity / 3);
+
+    for (int i = 0; i < E7_WIDTH; i++) {
+        if (_rainColOn[i] == false) { continue; }
+        _rainHead[i] -= _rainSpeed[i] * dtTicks;
+        if (_rainHead[i] < -3.0f) {
+            _rainHead[i] = (float)E7_HEIGHT + (float)(e7Rand() % 5);
+        }
+        int headY = (int)(_rainHead[i] + 0.5f);
+        for (int k = 0; k < trail; k++) {
+            int py = headY + k;
+            if (py < 0 || py >= E7_HEIGHT) { continue; }
+            float lv = (1.0f - (float)k / (float)trail) * ramp * rainMul;
+            if (lv > levels[py][i]) { levels[py][i] = lv; }
+        }
+    }
+
+    if (settleMode && target != NULL) {
+        // Капли, совпавшие с будущими цифрами, «прилипают»: берём максимум уровней
+        for (int y = 0; y < E7_HEIGHT; y++) {
+            for (int x = 0; x < E7_WIDTH; x++) {
+                if (target[y][x] && digitMul > levels[y][x]) { levels[y][x] = digitMul; }
+            }
+        }
+    }
+
+    _matrix.clear();
+    for (int y = 0; y < E7_HEIGHT; y++) {
+        for (int x = 0; x < E7_WIDTH; x++) {
+            if (levels[y][x] <= 0.0f) { continue; }
+            uint32_t color = e7FxColor(_config, x, y, _animPhase, _fxOrder);
+            compositePixel(x, y, color, levels[y][x]);
+        }
+    }
+    _matrix.show();
+}
+
+void CLASS_DEVICE_E7RGB::drawSettle() {
+    uint8_t target[E7_HEIGHT][E7_WIDTH];
+    buildTimeMask(_curH, _curM, target);
+    uint32_t dur = (uint32_t)_config.rainSettleDur * 1000u;
+    float p = (dur == 0) ? 1.0f : (float)(millis() - _settleStartMs) / (float)dur;
+    if (p < 0.0f) { p = 0.0f; }
+    if (p > 1.0f) { p = 1.0f; }
+    drawRain(true, p, target);
+}
+
+// ============================================================
+// Периодическая задача рендера (main-loop, E7_FX_RENDER_MS).
+// Продвигает фазу цвета раз в E7RGB_ANIM_MS и рисует текущее
+// состояние: дождь / оседание / переход / обычный кадр.
+// Show() безопасен: loop-контекст.
 // ============================================================
 void e7rgbAnimTask() {
     CLASS_DEVICE_E7RGB& d = device_electronica7_rgb;
 
-    if (e7FxAnimated(d._config.effect)) {
+    bool phaseAdvanced = false;
+    d._fxAccumMs += E7_FX_RENDER_MS;
+    if (d._fxAccumMs >= E7RGB_ANIM_MS) {
+        d._fxAccumMs -= E7RGB_ANIM_MS;
+        phaseAdvanced = true;
         float next = d._animPhase + (float)d._config.animSpeed;
         if (next >= 360.0f) {
             next -= 360.0f;
@@ -690,29 +1104,98 @@ void e7rgbAnimTask() {
             }
         }
         d._animPhase = next;
+    }
+
+    if (d._view == E7_VIEW_RAIN) {
+        d.drawRain(false, 0.0f, NULL);
+    } else if (d._view == E7_VIEW_SETTLE) {
+        d.drawSettle();
+    } else if (d._view == E7_VIEW_TRANS) {
+        d.drawTransition();
+    } else if (phaseAdvanced && e7FxAnimated(d._config.effect)) {
+        // обычный кадр перерисовываем только при смене фазы цвета
         d.applyMode();
     }
 
-    SetTimerTask(e7rgbAnimTask, E7RGB_ANIM_MS);
+    SetTimerTask(e7rgbAnimTask, E7_FX_RENDER_MS);
 }
 
 // ============================================================
 // Периодическая задача (1 сек, main-loop)
-// Show() вызывается только здесь или в deferredApplyTask.
+// Конечный автомат отображения: дождь -> оседание -> обычный
+// режим с переходами при смене времени.
 // ============================================================
 void e7rgbSecondTask() {
     CLASS_DEVICE_E7RGB& d = device_electronica7_rgb;
 
-    if (d._config.mode == E7_MODE_WORK) {
-        bool synced = (NTP.getLastNTPSync() > 0);
-        if (synced && !d._ntpWasSynced) {
+    if (d._config.mode != E7_MODE_WORK) {
+        SetTimerTask(e7rgbSecondTask, 1000);
+        return;
+    }
+
+    bool synced = (NTP.getLastNTPSync() > 0);
+
+    if (d._view == E7_VIEW_RAIN) {
+        if (synced) {
             d._ntpWasSynced = true;
-            d._forceRedraw = true;
+            uint32_t elapsed = millis() - d._rainStartMs;
+            if (elapsed >= (uint32_t)d._config.rainDurMin * 1000u) {
+                d._curH = (uint8_t)hour();
+                d._curM = (uint8_t)minute();
+                d._settleStartMs = millis();
+                if (d._config.rainSettleDur == 0) {
+                    d._view = E7_VIEW_NORMAL;
+                    d._lastMinute = d._curM;
+                    d.applyMode();
+                } else {
+                    d._view = E7_VIEW_SETTLE;
+                }
+            }
         }
-        uint8_t m = (uint8_t)minute();
-        if (d._forceRedraw || m != d._lastMinute) {
-            d._forceRedraw = false;
+        SetTimerTask(e7rgbSecondTask, 1000);
+        return;
+    }
+
+    if (d._view == E7_VIEW_SETTLE) {
+        uint32_t dur = (uint32_t)d._config.rainSettleDur * 1000u;
+        if (dur == 0 || (millis() - d._settleStartMs) >= dur) {
+            d._view = E7_VIEW_NORMAL;
+            d._curH = (uint8_t)hour();
+            d._curM = (uint8_t)minute();
+            d._lastMinute = d._curM;
+            d.applyMode();
+        }
+        SetTimerTask(e7rgbSecondTask, 1000);
+        return;
+    }
+
+    if (d._view == E7_VIEW_TRANS) {
+        uint32_t dur = (uint32_t)d._config.timeFxDur * 1000u;
+        if (dur == 0 || (millis() - d._transStartMs) >= dur) {
+            d._view = E7_VIEW_NORMAL;
+            d._lastMinute = d._curM;
+            d.applyMode();
+        }
+        SetTimerTask(e7rgbSecondTask, 1000);
+        return;
+    }
+
+    if (synced && !d._ntpWasSynced) {
+        d._ntpWasSynced = true;
+        d._forceRedraw = true;
+    }
+    uint8_t h = (uint8_t)hour();
+    uint8_t m = (uint8_t)minute();
+    if (d._forceRedraw || m != d._lastMinute) {
+        bool immediate = d._forceRedraw;   // первое время/смена настроек — без перехода
+        d._forceRedraw = false;
+        if (!immediate && synced && d._config.timeFx != E7_TFX_OFF && d._config.timeFxFreq > 0 &&
+            (m % d._config.timeFxFreq) == 0) {
+            d.startTransition(h, m);
+        } else {
             d._lastMinute = m;
+            d._curH = h;
+            d._curM = m;
             d.redrawFrame();
         }
     }

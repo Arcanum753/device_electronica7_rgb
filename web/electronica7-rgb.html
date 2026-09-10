@@ -165,6 +165,73 @@
         </div>
     </div>
 
+    <div class="content" style="text-align: center;">
+        <h3 style="margin: 6px 0;">Эффекты / Effects</h3>
+        <div class="params">
+            <table>
+                <tr><td class="label">Эффект смены времени:</td>
+                    <td>
+                        <select id="timeFx" onchange="updateEffectsUI()">
+                            <option value="0">Выкл</option>
+                            <option value="1">Затухание</option>
+                            <option value="2">Шторка слева-вправо</option>
+                            <option value="3">Шторка сверху-вниз</option>
+                            <option value="4">Растворение</option>
+                            <option value="5">Сдвиг вверх</option>
+                            <option value="6">Сдвиг вниз</option>
+                            <option value="7">Сдвиг влево</option>
+                            <option value="8">Сдвиг вправо</option>
+                            <option value="9">Вспышка</option>
+                            <option value="10">По цифрам (затухание)</option>
+                            <option value="11">По цифрам (сдвиг)</option>
+                        </select>
+                    </td></tr>
+                <tr id="timeFxFreqRow"><td class="label">Как часто:</td>
+                    <td>
+                        <select id="timeFxFreq">
+                            <option value="1">Каждую минуту</option>
+                            <option value="3">Каждые 3 минуты</option>
+                            <option value="5">Каждые 5 минут</option>
+                            <option value="10">Каждые 10 минут</option>
+                            <option value="15">Каждые 15 минут</option>
+                            <option value="20">Каждые 20 минут</option>
+                            <option value="40">Каждые 40 минут</option>
+                        </select>
+                    </td></tr>
+                <tr id="timeFxDurRow"><td class="label">Длительность перехода:</td>
+                    <td><input type="range" id="timeFxDur" min="1" max="10" value="2"
+                        oninput="document.getElementById('tfVal').innerText=this.value">
+                        <span id="tfVal">2</span> с</td></tr>
+                <tr id="timeFxBgRow"><td class="label">Фон перехода:</td>
+                    <td><input type="range" id="timeFxBg" min="0" max="10" value="3"
+                        oninput="document.getElementById('tbVal').innerText=this.value">
+                        <span id="tbVal">3</span></td></tr>
+                <tr><td class="label">Дождь при включении:</td>
+                    <td>
+                        <select id="rainEnabled" onchange="updateEffectsUI()">
+                            <option value="1">Включён</option>
+                            <option value="0">Выключен</option>
+                        </select>
+                    </td></tr>
+                <tr id="rainDurRow"><td class="label">Мин. длительность дождя:</td>
+                    <td><input type="range" id="rainDurMin" min="1" max="10" value="2"
+                        oninput="document.getElementById('rdVal').innerText=this.value">
+                        <span id="rdVal">2</span> с</td></tr>
+                <tr id="rainIntRow"><td class="label">Интенсивность дождя:</td>
+                    <td><input type="range" id="rainIntensity" min="1" max="10" value="6"
+                        oninput="document.getElementById('riVal').innerText=this.value">
+                        <span id="riVal">6</span></td></tr>
+                <tr id="rainSettleRow"><td class="label">Оседание в цифры:</td>
+                    <td><input type="range" id="rainSettleDur" min="0" max="10" value="1"
+                        oninput="document.getElementById('rsVal').innerText=this.value">
+                        <span id="rsVal">1</span> с</td></tr>
+                <tr><td colspan="2" style="text-align:center; padding:8px;">
+                    <input type="button" value="Применить" class="button-prog" onclick="applySettings()">
+                </td></tr>
+            </table>
+        </div>
+    </div>
+
     <div id="manualBlock" class="content section hidden" style="text-align:center;">
         <div class="manual-note">Ручной ввод цифр: выберите символ для каждой из 4 позиций (0-9, '-' прочерк, пусто).</div>
         <div class="manual-grid">
@@ -242,6 +309,19 @@
             document.getElementById('paletteRow').style.display = showCycle ? '' : 'none';
         }
 
+        // Показ/скрытие настроек эффектов смены времени и дождя
+        function updateEffectsUI() {
+            const fx = parseInt(document.getElementById('timeFx').value);
+            const rain = parseInt(document.getElementById('rainEnabled').value);
+            const showTf = (fx !== 0);
+            document.getElementById('timeFxFreqRow').style.display = showTf ? '' : 'none';
+            document.getElementById('timeFxDurRow').style.display = showTf ? '' : 'none';
+            document.getElementById('timeFxBgRow').style.display = showTf ? '' : 'none';
+            document.getElementById('rainDurRow').style.display = rain ? '' : 'none';
+            document.getElementById('rainIntRow').style.display = rain ? '' : 'none';
+            document.getElementById('rainSettleRow').style.display = rain ? '' : 'none';
+        }
+
         // Показываем только задействованные поля палитры
         function updatePaletteVisibility() {
             const n = parseInt(document.getElementById('colorsCount').value) || 1;
@@ -317,7 +397,15 @@
                   + '&digitsColor2=' + encodeURIComponent(get('digitsColor2'))
                   + '&animSpeed=' + get('animSpeed')
                   + '&colorsCount=' + get('colorsCount')
-                  + '&cycleMode=' + get('cycleMode');
+                  + '&cycleMode=' + get('cycleMode')
+                  + '&timeFx=' + get('timeFx')
+                  + '&timeFxFreq=' + get('timeFxFreq')
+                  + '&timeFxDur=' + get('timeFxDur')
+                  + '&timeFxBg=' + get('timeFxBg')
+                  + '&rainEnabled=' + get('rainEnabled')
+                  + '&rainDurMin=' + get('rainDurMin')
+                  + '&rainIntensity=' + get('rainIntensity')
+                  + '&rainSettleDur=' + get('rainSettleDur');
             for (let i = 0; i < 8; i++) {
                 const el = document.getElementById('palette' + i);
                 if (el) p += '&palette' + i + '=' + encodeURIComponent(el.value);
@@ -389,12 +477,18 @@
                 await loadFonts();
                 document.getElementById('bVal').innerText = document.getElementById('brightness').value;
                 document.getElementById('spVal').innerText = document.getElementById('animSpeed').value;
+                document.getElementById('tfVal').innerText = document.getElementById('timeFxDur').value;
+                document.getElementById('tbVal').innerText = document.getElementById('timeFxBg').value;
+                document.getElementById('rdVal').innerText = document.getElementById('rainDurMin').value;
+                document.getElementById('riVal').innerText = document.getElementById('rainIntensity').value;
+                document.getElementById('rsVal').innerText = document.getElementById('rainSettleDur').value;
                 const mtEl = document.getElementById('manualText');
                 applyManualText((mtEl && mtEl.value) ? mtEl.value : '0000');
                 fillDirectionOptions(parseInt(document.getElementById('origin').value));
                 updatePaletteVisibility();
                 updateFxUI();
                 updateModeUI();
+                updateEffectsUI();
             } catch(e) {}
         }
 
@@ -405,6 +499,7 @@
             loadFonts();
             updateFxUI();
             updateModeUI();
+            updateEffectsUI();
             setTimeout(() => {
                 ApplyCVT("/e7rgb/info")
                     .then(() => updateFromInfo())
