@@ -8,6 +8,7 @@
 #include "common/common.h"
 #include "common/TimeLib.h"
 #include "device_electronica7_rgb_version.h"
+#include "core_state/core_state.h"
 #include "core_sys/eertos.h"
 
 #include <math.h>
@@ -107,6 +108,138 @@ void CLASS_DEVICE_E7RGB::begin(ModContext& ctx) {
 }
 
 // ============================================================
+// register_resources() — публикация ресурсов на шине core_state
+// ============================================================
+static const char* const e7BusModeNames[3] = { "off", "auto", "macro" };
+static const char* const e7EffectNames[5] = {
+    "mono", "rainbow", "grad_static", "grad_dynamic", "colorcycle",
+};
+
+static int e7ArgInt(const BusValue* a) {
+    if (a == nullptr) { return 0; }
+    if (a->kind == BusValue::F32) { return (int)a->f; }
+    if (a->kind == BusValue::BOOL) { return a->b ? 1 : 0; }
+    return (int)a->i;
+}
+
+static int e7BusEffect(void*, int argc, const BusValue* a, BusValue&) {
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setEffect((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusBrightness(void*, int argc, const BusValue* a, BusValue&) {
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setBrightness((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusSpeed(void*, int argc, const BusValue* a, BusValue&) {
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setSpeed((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusColor(void*, int argc, const BusValue* a, BusValue&) {
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setDigitsColor((uint32_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusText(void*, int argc, const BusValue* a, BusValue&) {
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setManualText(a[0].s) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusMode(void*, int argc, const BusValue* a, BusValue&) {
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setBusMode((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+
+void CLASS_DEVICE_E7RGB::register_resources() {
+    DEBUGE7RGB("%s\r\n", __FUNCTION__);
+
+    core_state.regEnum("mode", 3, e7BusModeNames, "device control mode (off/auto/macro)");
+    core_state.regEnum("effect", 5, e7EffectNames, "color effect");
+    core_state.regState("brightness", BusValue::I32, "brightness 0..255", true);
+    core_state.regState("speed", BusValue::I32, "animation speed 1..50", true);
+    core_state.regState("color", BusValue::I32, "digits color 0xRRGGBB", true);
+    core_state.regState("text", BusValue::STR, "manual text (4 chars)", true);
+
+    core_state.regFunc("mode", "i->", "set control mode", e7BusMode, nullptr);
+    core_state.regFunc("effect", "i->", "set effect", e7BusEffect, nullptr);
+    core_state.regFunc("brightness", "i->", "set brightness", e7BusBrightness, nullptr);
+    core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
+    core_state.regFunc("color", "i->", "set digits color", e7BusColor, nullptr);
+    core_state.regFunc("text", "s->", "set manual text", e7BusText, nullptr);
+
+    core_state.signal("e7.mode", BusValue::en(_config.busMode));
+    core_state.signal("e7.effect", BusValue::en(_config.effect));
+    core_state.signal("e7.brightness", BusValue::i32(_config.brightness));
+    core_state.signal("e7.speed", BusValue::i32(_config.animSpeed));
+    core_state.signal("e7.color", BusValue::i32((int32_t)_config.digitsColor));
+}
+
+// Публичные сеттеры для шины: меняют конфиг и применяют отложенно.
+bool CLASS_DEVICE_E7RGB::setEffect(uint8_t e) {
+    if (e > E7_EFFECT_COLORCYCLE) { return false; }
+    _config.effect = e;
+    _forceRedraw = true;
+    _pendingSave = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.effect", BusValue::en(e));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setBrightness(uint8_t b) {
+    _config.brightness = b;
+    _forceRedraw = true;
+    _pendingSave = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.brightness", BusValue::i32(b));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setSpeed(uint8_t s) {
+    if (s < 1 || s > 50) { return false; }
+    _config.animSpeed = s;
+    _pendingSave = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.speed", BusValue::i32(s));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setDigitsColor(uint32_t c) {
+    _config.digitsColor = c & 0xFFFFFF;
+    _forceRedraw = true;
+    _pendingSave = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.color", BusValue::i32((int32_t)_config.digitsColor));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setManualText(const String& t) {
+    String s = t.substring(0, 4);
+    _config.manualText = s;
+    _config.mode = E7_MODE_MANUAL;
+    _forceRedraw = true;
+    _pendingSave = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.text", BusValue::str(s));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setBusMode(uint8_t m) {
+    if (m > E7_BUS_MACRO) { return false; }
+    _config.busMode = m;
+    _forceRedraw = true;
+    _pendingSave = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.mode", BusValue::en(m));
+    return true;
+}
+
+uint8_t CLASS_DEVICE_E7RGB::getBusMode() {
+    return _config.busMode;
+}
+
+// ============================================================
 // web_Init()
 // Все эндпоинты — GET (только по необходимости возможен POST,
 // для этого устройства ничего требующего POST нет).
@@ -142,6 +275,7 @@ void CLASS_DEVICE_E7RGB::handleInfo(AsyncWebServerRequest *request) {
     DEBUGE7RGB("%s\r\n", __FUNCTION__);
     String values = "";
 
+    values += "busMode|"       + String(_config.busMode)       + "|input\n";
     values += "mode|"          + String(_config.mode)          + "|input\n";
     values += "dataPin|"       + String(_config.dataPin)       + "|input\n";
     values += "brightness|"    + String(_config.brightness)    + "|input\n";
@@ -371,6 +505,7 @@ void CLASS_DEVICE_E7RGB::deferredApplyTask() {
 // ============================================================
 
 void CLASS_DEVICE_E7RGB::defaultConfig() {
+    _config.busMode     = E7_BUS_AUTO;
     _config.mode        = E7_MODE_WORK;
     _config.dataPin     = 16;
     _config.brightness  = 25;
@@ -409,6 +544,7 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     JsonDocument doc;
     if (core_json.jsonFileLoadDoc(CONFIG_FILE_E7RGB, doc) == false) { return false; }
 
+    _config.busMode     = (uint8_t)constrain(doc["busMode"].as<int>(), E7_BUS_OFF, E7_BUS_MACRO);
     _config.mode        = (uint8_t)constrain(doc["mode"].as<int>(), E7_MODE_WORK, E7_MODE_MANUAL);
     _config.dataPin     = (int16_t)constrain(doc["dataPin"].as<int>(), -1, 33);
     _config.brightness  = (uint8_t)constrain(doc["brightness"].as<int>(), 0, 255);
@@ -475,6 +611,7 @@ bool CLASS_DEVICE_E7RGB::saveConfig() {
     JsonDocument doc;
     core_json.jsonFileLoadDoc(CONFIG_FILE_E7RGB, doc);
 
+    doc["busMode"]     = _config.busMode;
     doc["mode"]        = _config.mode;
     doc["dataPin"]     = _config.dataPin;
     doc["brightness"]  = _config.brightness;
@@ -906,6 +1043,12 @@ void CLASS_DEVICE_E7RGB::drawSettle() {
 void e7rgbAnimTask() {
     CLASS_DEVICE_E7RGB& d = device_electronica7_rgb;
 
+    // Режим off: матрица погашена, рендер не выполняется.
+    if (d._config.busMode == E7_BUS_OFF) {
+        SetTimerTask(e7rgbAnimTask, E7_FX_RENDER_MS);
+        return;
+    }
+
     bool phaseAdvanced = false;
     d._fxAccumMs += E7_FX_RENDER_MS;
     if (d._fxAccumMs >= E7RGB_ANIM_MS) {
@@ -947,6 +1090,12 @@ void e7rgbAnimTask() {
 // ============================================================
 void e7rgbSecondTask() {
     CLASS_DEVICE_E7RGB& d = device_electronica7_rgb;
+
+    // Режим off: логика времени не работает.
+    if (d._config.busMode == E7_BUS_OFF) {
+        SetTimerTask(e7rgbSecondTask, 1000);
+        return;
+    }
 
     if (d._config.mode != E7_MODE_WORK) {
         SetTimerTask(e7rgbSecondTask, 1000);

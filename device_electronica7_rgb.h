@@ -24,6 +24,11 @@
 #define E7_MODE_WORK        0   // рабочий режим: часы ЧЧ:ММ (NTP)
 #define E7_MODE_MANUAL      1   // ручной режим: свой символ в каждой из 4 цифр
 
+// Режим управления шиной (off / auto / macro)
+#define E7_BUS_OFF          0   // выключено: матрица погашена
+#define E7_BUS_AUTO         1   // автономная работа
+#define E7_BUS_MACRO        2   // управляется сценариями
+
 // Эффекты окраски отображаемого
 #define E7_EFFECT_MONO          0   // моноцвет (digitsColor)
 #define E7_EFFECT_RAINBOW       1   // радуга с переливом
@@ -76,6 +81,7 @@
 #define E7_VIEW_TRANS   3   // переход смены времени
 
 typedef struct {
+    uint8_t  busMode;       // E7_BUS_OFF / E7_BUS_AUTO / E7_BUS_MACRO
     uint8_t  mode;          // E7_MODE_WORK / E7_MODE_MANUAL
     int16_t  dataPin;       // пин данных (по умолчанию 16, -1 = выкл.)
     uint8_t  brightness;    // 0..255 (по умолчанию 25; масштабирование каналов)
@@ -108,7 +114,17 @@ public:
     void setFs(fs::LittleFSFS* fs);
     void begin();
     void begin(ModContext& ctx);
+    void register_resources();
     void web_Init();
+
+    // Публичное API для ресурсной шины
+    bool setEffect(uint8_t e);
+    bool setBrightness(uint8_t b);
+    bool setSpeed(uint8_t s);
+    bool setDigitsColor(uint32_t c);
+    bool setManualText(const String& t);
+    bool setBusMode(uint8_t m);
+    uint8_t getBusMode();
 
 private:
     // Версионные методы
