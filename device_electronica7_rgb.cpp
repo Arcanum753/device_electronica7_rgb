@@ -152,6 +152,11 @@ static int e7BusMode(void*, int argc, const BusValue* a, BusValue&) {
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setBusMode((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
+static int e7BusSave(void*, int argc, const BusValue* a, BusValue&) {
+    (void)argc; (void)a;
+    device_electronica7_rgb.saveNow();
+    return BUS_OK;
+}
 
 void CLASS_DEVICE_E7RGB::register_resources() {
     DEBUGE7RGB("%s\r\n", __FUNCTION__);
@@ -169,15 +174,16 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
     core_state.regFunc("color", "i->", "set digits color", e7BusColor, nullptr);
     core_state.regFunc("text", "s->", "set manual text", e7BusText, nullptr);
+    core_state.regFunc("save", "->", "persist current settings to config", e7BusSave, nullptr);
     // Значения публикуются в begin() после loadConfig().
 }
 
-// Публичные сеттеры для шины: меняют конфиг и применяют отложенно.
+// Публичные сеттеры для шины: меняют значения в памяти и применяют отложенно,
+// но НЕ сохраняют конфиг (сохранение — handleSave/терминал/явный e7.save).
 bool CLASS_DEVICE_E7RGB::setEffect(uint8_t e) {
     if (e > E7_EFFECT_COLORCYCLE) { return false; }
     _config.effect = e;
     _forceRedraw = true;
-    _pendingSave = true;
     _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.effect", BusValue::en(e));
@@ -187,7 +193,6 @@ bool CLASS_DEVICE_E7RGB::setEffect(uint8_t e) {
 bool CLASS_DEVICE_E7RGB::setBrightness(uint8_t b) {
     _config.brightness = b;
     _forceRedraw = true;
-    _pendingSave = true;
     _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.brightness", BusValue::i32(b));
@@ -197,7 +202,7 @@ bool CLASS_DEVICE_E7RGB::setBrightness(uint8_t b) {
 bool CLASS_DEVICE_E7RGB::setSpeed(uint8_t s) {
     if (s < 1 || s > 50) { return false; }
     _config.animSpeed = s;
-    _pendingSave = true;
+    _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.speed", BusValue::i32(s));
     return true;
@@ -206,7 +211,6 @@ bool CLASS_DEVICE_E7RGB::setSpeed(uint8_t s) {
 bool CLASS_DEVICE_E7RGB::setDigitsColor(uint32_t c) {
     _config.digitsColor = c & 0xFFFFFF;
     _forceRedraw = true;
-    _pendingSave = true;
     _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.color", BusValue::i32((int32_t)_config.digitsColor));
@@ -218,7 +222,6 @@ bool CLASS_DEVICE_E7RGB::setManualText(const String& t) {
     _config.manualText = s;
     _config.mode = E7_MODE_MANUAL;
     _forceRedraw = true;
-    _pendingSave = true;
     _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.text", BusValue::str(s));
@@ -229,7 +232,6 @@ bool CLASS_DEVICE_E7RGB::setBusMode(uint8_t m) {
     if (m > E7_BUS_MACRO) { return false; }
     _config.busMode = m;
     _forceRedraw = true;
-    _pendingSave = true;
     _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.mode", BusValue::en(m));
@@ -238,6 +240,11 @@ bool CLASS_DEVICE_E7RGB::setBusMode(uint8_t m) {
 
 uint8_t CLASS_DEVICE_E7RGB::getBusMode() {
     return _config.busMode;
+}
+
+void CLASS_DEVICE_E7RGB::saveNow() {
+    _pendingSave = true;
+    SetTask(deferredApplyTask);
 }
 
 // ============================================================
@@ -323,6 +330,7 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
         DEBUGE7RGB("Arg %d: %s %s\r\n", i, name.c_str(), val.c_str());
 
         if (name == "busMode") {
+            // TODO: уточнить — восстанавливать config при выходе из macro?
             _config.busMode = (uint8_t)constrain(val.toInt(), E7_BUS_OFF, E7_BUS_MACRO);
             core_state.signal("e7.mode", BusValue::en(_config.busMode));
             continue;
@@ -444,6 +452,7 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
     if (_pendingReinit) {
         _pendingApply = true;
     } else {
+        // TODO: уточнить — сохранять только изменённые поля?
         _pendingSave = true;
         _pendingApply = true;
     }

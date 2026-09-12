@@ -36,6 +36,9 @@ public:
     bool setBusMode(uint8_t m);
     uint8_t getBusMode();
 
+    // Явное сохранение текущего in-memory конфига (для терминала и макросов).
+    void saveNow();
+
 private:
     // Версионные методы
     String getVersionStr();
@@ -84,6 +87,8 @@ protected:
     strE7RgbConfig _config;
     E7Matrix _matrix;
     E7Fonts _fonts;
+    String  _loadedFontPath;  // путь уже загруженного шрифта (защита от повторных open)
+    uint32_t _loadedFontSize = 0; // размер файла при загрузке (для перезагрузки при замене)
 
     uint8_t  _lastMinute;      // последняя нарисованная минута
     bool    _ntpWasSynced;    // первая синхронизация NTP (переход на часы)

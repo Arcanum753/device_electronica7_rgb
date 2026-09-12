@@ -1,42 +1,12 @@
--- E7 RGB: медленный цикл цвета (12 шагов по кругу).
+-- E7 RGB: цикл цвета, первая половина (12 шагов разбито на 2 файла по лимиту правил).
 return {
-    desc = "E7 color cycle (12 steps)",
+    desc = "E7 color cycle (steps 1/2)",
     rules = {
-        { cron = "0 * * * * *", body = function()
-            set("e7.color", 16711680)
-        end },
-        { cron = "5 * * * * *", body = function()
-            set("e7.color", 16744448)
-        end },
-        { cron = "10 * * * * *", body = function()
-            set("e7.color", 16776960)
-        end },
-        { cron = "15 * * * * *", body = function()
-            set("e7.color", 8453888)
-        end },
-        { cron = "20 * * * * *", body = function()
-            set("e7.color", 65280)
-        end },
-        { cron = "25 * * * * *", body = function()
-            set("e7.color", 65408)
-        end },
-        { cron = "30 * * * * *", body = function()
-            set("e7.color", 65535)
-        end },
-        { cron = "35 * * * * *", body = function()
-            set("e7.color", 33023)
-        end },
-        { cron = "40 * * * * *", body = function()
-            set("e7.color", 255)
-        end },
-        { cron = "45 * * * * *", body = function()
-            set("e7.color", 8388863)
-        end },
-        { cron = "50 * * * * *", body = function()
-            set("e7.color", 16711935)
-        end },
-        { cron = "55 * * * * *", body = function()
-            set("e7.color", 16711808)
-        end },
-    }
+        { cron = "0 * * * * *",  call = "e7.color", args = { 16711680 } },
+        { cron = "5 * * * * *",  call = "e7.color", args = { 16744448 } },
+        { cron = "10 * * * * *", call = "e7.color", args = { 16776960 } },
+        { cron = "15 * * * * *", call = "e7.color", args = { 8453888 } },
+        { cron = "20 * * * * *", call = "e7.color", args = { 65280 } },
+        { cron = "25 * * * * *", call = "e7.color", args = { 65408 } },
+    },
 }

@@ -15,11 +15,28 @@
 bool CLASS_DEVICE_E7RGB::loadFont() {
     if (_fs == NULL) { return false; }
     if (ns_device_electronica7_rgb::e7FontPathOk(_config.fontFile) == false) { _config.fontFile = E7_FONT_DEFAULT; }
+
+    // Размер текущего файла: нужен и для проверки кэша, и для обнаружения замены.
+    uint32_t size = 0;
+    File sf = _fs->open(_config.fontFile, "r");
+    if (sf) { size = (uint32_t)sf.size(); sf.close(); }
+
+    // Этот же шрифт уже загружен и файл не изменился — не открываем повторно
+    // (частые apply из макросов не должны дёргать FS).
+    if (_loadedFontPath == _config.fontFile && size > 0 && size == _loadedFontSize) { return true; }
+
     // каталог шрифтов должен существовать для записи файла
     _fs->mkdir(E7_FONT_DIR);
-    if (_fonts.loadOrCreate(*_fs, _config.fontFile.c_str())) { return true; }
-    _fonts.loadDefault();
-    return false;
+    if (_fonts.loadOrCreate(*_fs, _config.fontFile.c_str()) == false) {
+        _fonts.loadDefault();
+        // Неудачу не кэшируем: следующая попытка снова прочитает файл.
+        _loadedFontPath = "";
+        _loadedFontSize = 0;
+        return false;
+    }
+    _loadedFontPath = _config.fontFile;
+    _loadedFontSize = size;
+    return true;
 }
 
 void CLASS_DEVICE_E7RGB::initMatrix() {

@@ -2,14 +2,12 @@
 return {
     desc = "E7 slot 35-40: effect 2",
     rules = {
-        { cron = "0 35 * * * *", body = function()
-            set("e7.effect", 2)
-            set("e7.speed", 30)
-            set("e7.brightness", 50)
-            set("e7.color", 8388863)
-        end },
-        { cron = "30 37 * * * *", body = function()
-            set("e7.color", 8404992)
-        end },
-    }
+        { cron = "0 35 * * * *", calls = {
+            { name = "e7.effect",     args = { 2 } },
+            { name = "e7.speed",      args = { 30 } },
+            { name = "e7.brightness", args = { 50 } },
+            { name = "e7.color",      args = { 8388863 } },
+        } },
+        { cron = "30 37 * * * *", call = "e7.color", args = { 8404992 } },
+    },
 }
