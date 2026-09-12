@@ -28,10 +28,10 @@ bool e7TfxFreqOk(int f);
 uint32_t e7HexStringToUint32(const String& hexStr);
 
 // Помощники спецэффектов окраски
-uint32_t e7HsvToRgb(float h, float s, float v);
-uint32_t e7LerpColor(uint32_t c1, uint32_t c2, float t);
 void     e7SeedRng();
 uint32_t e7Rand();
+uint32_t e7HsvToRgb(float h, float s, float v);
+uint32_t e7LerpColor(uint32_t c1, uint32_t c2, float t);
 void     e7ShuffleOrder(uint8_t* arr, int n);
 
 // Нормированная позиция (0..1) вдоль оси выбранного направления
