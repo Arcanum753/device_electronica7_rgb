@@ -43,6 +43,14 @@
     <div class="content" style="text-align: center;">
         <div class="params">
             <table>
+                <tr><td class="label">Режим модуля / Module mode:</td>
+                    <td>
+                        <select id="busMode" onchange="applySettings()">
+                            <option value="0">off (выключено)</option>
+                            <option value="1">auto (автономно)</option>
+                            <option value="2">macro (сценарии)</option>
+                        </select>
+                    </td></tr>
                 <tr><td class="label">Режим / Mode:</td>
                     <td>
                         <select id="mode" onchange="updateModeUI()">
@@ -390,7 +398,8 @@
             const get = (id) => document.getElementById(id).value;
             let mt = '';
             for (let i = 0; i < 4; i++) mt += document.getElementById('m' + i).value;
-            let p = 'mode=' + get('mode')
+            let p = 'busMode=' + get('busMode')
+                  + '&mode=' + get('mode')
                   + '&effect=' + get('effect')
                   + '&effectDir=' + get('effectDir')
                   + '&digitsColor=' + encodeURIComponent(get('digitsColor'))

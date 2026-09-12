@@ -87,6 +87,14 @@ void CLASS_DEVICE_E7RGB::begin() {
     defaultConfig();
     if (loadConfig() == false) { saveConfig(); }
 
+    // Публикуем фактические значения конфига после его загрузки.
+    core_state.signal("e7.mode", BusValue::en(_config.busMode));
+    core_state.signal("e7.effect", BusValue::en(_config.effect));
+    core_state.signal("e7.brightness", BusValue::i32(_config.brightness));
+    core_state.signal("e7.speed", BusValue::i32(_config.animSpeed));
+    core_state.signal("e7.color", BusValue::i32((int32_t)_config.digitsColor));
+    core_state.signal("e7.text", BusValue::str(_config.manualText));
+
     if (_fs != NULL) { loadFont(); }
 
     initMatrix();
@@ -163,12 +171,7 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
     core_state.regFunc("color", "i->", "set digits color", e7BusColor, nullptr);
     core_state.regFunc("text", "s->", "set manual text", e7BusText, nullptr);
-
-    core_state.signal("e7.mode", BusValue::en(_config.busMode));
-    core_state.signal("e7.effect", BusValue::en(_config.effect));
-    core_state.signal("e7.brightness", BusValue::i32(_config.brightness));
-    core_state.signal("e7.speed", BusValue::i32(_config.animSpeed));
-    core_state.signal("e7.color", BusValue::i32((int32_t)_config.digitsColor));
+    // Значения публикуются в begin() после loadConfig().
 }
 
 // Публичные сеттеры для шины: меняют конфиг и применяют отложенно.
@@ -321,6 +324,11 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
         String val  = request->arg(i);
         DEBUGE7RGB("Arg %d: %s %s\r\n", i, name.c_str(), val.c_str());
 
+        if (name == "busMode") {
+            _config.busMode = (uint8_t)constrain(val.toInt(), E7_BUS_OFF, E7_BUS_MACRO);
+            core_state.signal("e7.mode", BusValue::en(_config.busMode));
+            continue;
+        }
         if (name == "mode") {
             _config.mode = (uint8_t)constrain(val.toInt(), E7_MODE_WORK, E7_MODE_MANUAL);
             continue;
@@ -483,6 +491,13 @@ void CLASS_DEVICE_E7RGB::deferredApplyTask() {
     if (d._fs != NULL) { d.loadFont(); }
 
     if (d._pendingApply) {
+        // Режим off: погасить матрицу и не рисовать кадр.
+        if (d._config.busMode == E7_BUS_OFF) {
+            d._matrix.clear();
+            d._matrix.show();
+            d._pendingApply = false;
+            return;
+        }
         // Скорректировать состояние отображения под изменённые настройки
         bool synced = (NTP.getLastNTPSync() > 0);
         if (d._config.mode != E7_MODE_WORK) {
