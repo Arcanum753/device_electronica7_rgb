@@ -128,23 +128,34 @@ static int e7ArgInt(const BusValue* a) {
     return (int)a->i;
 }
 
+// Bus-функции e7 доступны только в режиме MACRO. В AUTO/OFF
+// возвращаем ERR_DENIED (macros игнорируется в автономном режиме).
+static bool e7BusAllowed() {
+    return device_electronica7_rgb.getBusMode() == E7_BUS_MACRO;
+}
+
 static int e7BusEffect(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setEffect((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
 static int e7BusBrightness(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setBrightness((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
 static int e7BusSpeed(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setSpeed((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
 static int e7BusColor(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setDigitsColor((uint32_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
 static int e7BusText(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setManualText(a[0].s) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
@@ -153,6 +164,7 @@ static int e7BusMode(void*, int argc, const BusValue* a, BusValue&) {
     return device_electronica7_rgb.setBusMode((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
 static int e7BusSave(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     (void)argc; (void)a;
     device_electronica7_rgb.saveNow();
     return BUS_OK;
@@ -169,6 +181,8 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     core_state.regState("text", BusValue::STR, "manual text (4 chars)", true);
 
     core_state.regFunc("mode", "i->", "set control mode", e7BusMode, nullptr);
+    // Все bus-функции, кроме mode, работают только в режиме MACRO.
+    // mode — канал управления режимом (принимается всегда).
     core_state.regFunc("effect", "i->", "set effect", e7BusEffect, nullptr);
     core_state.regFunc("brightness", "i->", "set brightness", e7BusBrightness, nullptr);
     core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
@@ -228,6 +242,9 @@ bool CLASS_DEVICE_E7RGB::setManualText(const String& t) {
     return true;
 }
 
+// Единственная точка смены режима. Доступна и через web (/e7rgb/save),
+// и через bus (e7.mode). Другие bus-функции в AUTO/OFF отвергаются —
+// см. e7BusAllowed().
 bool CLASS_DEVICE_E7RGB::setBusMode(uint8_t m) {
     if (m > E7_BUS_MACRO) { return false; }
     _config.busMode = m;

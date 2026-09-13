@@ -23,6 +23,9 @@
         .pal-in { display: inline-flex; flex-direction: column; align-items: center; margin: 0 3px; }
         .pal-in input[type="color"] { width: 26px; height: 26px; padding: 0; border: 1px solid #666; }
         .pal-in .pal-lbl { font-size: 10px; color: #555; }
+        .bus-warn { display: none; margin: 8px auto; padding: 8px 12px; max-width: 720px;
+                    border: 1px solid #e0a800; background: #fff8e1; color: #7a5c00;
+                    border-radius: 4px; text-align: left; }
     </style>
 </head>
 <body>
@@ -41,11 +44,15 @@
     </div>
 
     <div class="content" style="text-align: center;">
+        <div id="busModeWarn" class="bus-warn">
+            ⚠ Модуль управляется сценариями (macros). Изменения параметров здесь будут
+            перезаписаны сценариями. Сохранение в конфиг — не через эту страницу.
+        </div>
         <div class="params">
             <table>
                 <tr><td class="label">Режим модуля / Module mode:</td>
                     <td>
-                        <select id="busMode" onchange="applySettings()">
+                        <select id="busMode" onchange="applySettings(); updateBusModeWarning();">
                             <option value="0">off (выключено)</option>
                             <option value="1">auto (автономно)</option>
                             <option value="2">macro (сценарии)</option>
@@ -302,6 +309,11 @@
             document.getElementById('manualBlock').classList.toggle('hidden', !manual);
         }
 
+        function updateBusModeWarning() {
+            const macro = (document.getElementById('busMode').value === '2');
+            document.getElementById('busModeWarn').style.display = macro ? 'block' : 'none';
+        }
+
         // Показ/скрытие строк интерфейса по выбранному эффекту
         function updateFxUI() {
             const fx = parseInt(document.getElementById('effect').value);
@@ -498,6 +510,7 @@
                 updateFxUI();
                 updateModeUI();
                 updateEffectsUI();
+                updateBusModeWarning();
             } catch(e) {}
         }
 
