@@ -3,6 +3,7 @@
 <head>
     <title>Electronica7 RGB</title>
     <meta http-equiv="Content-type" content="text/html; charset=utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="style.css">
     <style>
         .section { margin: 12px auto; }
@@ -221,11 +222,11 @@
                     <td><input type="range" id="timeFxBg" min="0" max="10" value="3"
                         oninput="document.getElementById('tbVal').innerText=this.value">
                         <span id="tbVal">3</span></td></tr>
-                <tr><td class="label">Дождь при включении:</td>
+                <tr><td class="label">Анимация синхронизации (дождь):</td>
                     <td>
                         <select id="rainEnabled" onchange="updateEffectsUI()">
-                            <option value="1">Включён</option>
-                            <option value="0">Выключен</option>
+                            <option value="1">Включена (дождь до синхронизации)</option>
+                            <option value="0">Выключена (часы с 00:00, переход при синхро)</option>
                         </select>
                     </td></tr>
                 <tr id="rainDurRow"><td class="label">Мин. длительность дождя:</td>

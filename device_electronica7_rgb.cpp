@@ -1,7 +1,8 @@
 #include "core_web/FSWebServerLib.h"
 
-#include "core_ntp/NtpClientLib.h"
 #include "core_json/core_json.h"
+
+#include "core_sys/core_sys.h"
 
 #include "device_electronica7_rgb.h"
 #include "common_module.h"
@@ -98,7 +99,7 @@ void CLASS_DEVICE_E7RGB::begin() {
     initMatrix();
 
     _animPhase = 0.0f;
-    if (_config.mode == E7_MODE_WORK && _config.rainEnabled == 1 && NTP.getLastNTPSync() == 0) {
+    if (_config.mode == E7_MODE_WORK && _config.rainEnabled == 1 && !core_sys.timeValid()) {
         startRain();
     } else {
         applyMode();
@@ -329,9 +330,9 @@ void CLASS_DEVICE_E7RGB::handleInfo(AsyncWebServerRequest *request) {
     values += "rainIntensity|" + String(_config.rainIntensity) + "|input\n";
     values += "rainSettleDur|" + String(_config.rainSettleDur) + "|input\n";
 
-    bool synced = (NTP.getLastNTPSync() > 0);
+    bool synced = core_sys.timeValid();
     values += "x_ntp_sync|"    + String(synced ? 1 : 0)        + "|div\n";
-    values += "x_time|"        + (synced ? ns_device_electronica7_rgb::e7TimeHhMm() : String("—")) + "|div\n";
+    values += "x_time|"        + (synced ? ns_device_electronica7_rgb::e7TimeHhMm(core_sys.timeNow()) : String("—")) + "|div\n";
 
     request->send(200, "text/plain", values);
 }

@@ -6,8 +6,8 @@
 > (см. `../../TRS.md` §2.2).
 
 Вывод HH:MM (или ручного 4-символьного текста) на матрице WS2812 7×16 со шрифтами из ФС;
-цветовые эффекты, 12 типов переходных эффектов при смене времени, эффект «дождя»/«оседания»
-до синхронизации NTP; режимы шины off/auto/macro.
+цветовые эффекты, 12 типов переходных эффектов при смене времени, эффект «дождя»/«осадания»
+до появления валидного времени (`core_sys.timeValid()`); режимы шины off/auto/macro.
 
 - **Репозиторий:** https://github.com/Arcanum753/device_electronica7_rgb
 - **Папка:** `src/device_electronica7_rgb/`
@@ -16,20 +16,26 @@
 - **Env:** `esp32_electronica7_rgb` и `esp32_electronica7_rgb_macros` (с `module_macros` и таблицей `partitions_esp32_macro.csv`)
 - **Только для платформы:** ESP32
 - **Зависит от модулей:** `module_udp`, `module_otaclient`, (`module_macros` — только в macros-env)
-- **Зависит от ядра:** `core_web`, `core_sys`, `core_json`, `core_ntp`, `core_state`, `core_led`
+- **Зависит от ядра:** `core_web`, `core_sys`, `core_json`, `core_state`, `core_led`
 
 ## Назначение
 
 Вывод HH:MM (или ручного 4-символьного текста) на матрице WS2812 7×16 со шрифтами из ФС;
-цветовые эффекты, 12 типов переходных эффектов при смене времени, эффект «дождя»/«оседания»
-до синхронизации NTP; режимы шины off/auto/macro.
+цветовые эффекты, 12 типов переходных эффектов при смене времени, эффект «дождя»/«осадания»
+до появления валидного времени (`core_sys.timeValid()`); режимы шины off/auto/macro.
 
 ## Функциональные требования
 
-- FR-E7RGB-1: Отображать время HH:MM или `manualText`; шрифт из `fontFile` (по умолчанию `/e7fonts/digital7.fnt`), кэшировать путь+размер.
+- FR-E7RGB-1: Отображать время HH:MM или `manualText`; время — `core_sys.timeNow()`, показ при
+  `core_sys.timeValid() || core_sys.timeFallback()` (часы видны всегда, при отсутствии источника —
+  внутренние часы ядра с 00:00); шрифт из `fontFile` (по умолчанию `/e7fonts/digital7.fnt`),
+  кэшировать путь+размер.
 - FR-E7RGB-2: Эффекты `effect` (моно, радуга, градиент статичный/динамичный, цикл цвета) с `effectDir`, `animSpeed`, `palette[8]`, `colorsCount`, `cycleMode`.
 - FR-E7RGB-3: Переходные эффекты `timeFx` (12 типов), `timeFxFreq`, `timeFxDur`, `timeFxBg`.
-- FR-E7RGB-4: Вступительный «дождь»: `rainEnabled`, `rainDurMin`, `rainIntensity`, `rainSettleDur`.
+- FR-E7RGB-4: «Анимация синхронизации» (`rainEnabled`): при `1` — вступительный «дождь» до
+  валидного времени; при `0` — показывать часы с 00:00 (внутренние часы ядра), а при
+  синхронизации — анимированный переход (`timeFx`) к актуальному времени. Параметры дождя:
+  `rainDurMin`, `rainIntensity`, `rainSettleDur`.
 - FR-E7RGB-5: Публичные сеттеры (`setEffect`, `setBrightness`, `setSpeed`, `setDigitsColor`, `setManualText`, `setBusMode`) применяют изменения в RAM/на экране, но **не сохраняют** конфиг; сигналят на шину; планируют отложенное применение.
 - FR-E7RGB-6: `saveNow()` и web `handleSave` сохраняют конфиг; bus-функция `e7.save` ставит отложенное сохранение.
 - FR-E7RGB-7: Режимы шины `off/auto/macro` (`busMode`); bus-запись (кроме `mode`) разрешена только в `macro`, иначе `BUS_ERR_DENIED`.

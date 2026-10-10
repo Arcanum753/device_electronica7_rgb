@@ -1,11 +1,10 @@
 #include "core_web/FSWebServerLib.h"
 
-#include "core_ntp/NtpClientLib.h"
-
 #include "device_electronica7_rgb.h"
 #include "common_module.h"
 #include "common/common.h"
 #include "common/TimeLib.h"
+#include "core_sys/core_sys.h"
 #include "core_sys/eertos.h"
 
 // ============================================================
@@ -66,10 +65,13 @@ void CLASS_DEVICE_E7RGB::applyMode() {
 
 void CLASS_DEVICE_E7RGB::redrawFrame() {
     if (_matrix.ready() == false) { return; }
-    if (NTP.getLastNTPSync() > 0) {
-        renderDigits((uint8_t)hour(), (uint8_t)minute());
+    // Время показывается всегда: если валидного источника нет, идут внутренние
+    // часы ядра (стартуют с 00:00). Дождь — опциональная анимация синхронизации.
+    if (core_sys.timeValid() || core_sys.timeFallback()) {
+        time_t t = core_sys.timeNow();
+        renderDigits((uint8_t)hour(t), (uint8_t)minute(t));
     } else {
-        // NTP ещё не синхронизирован — прочерки («нет времени»)
+        // Время ещё не валидно — прочерки («нет времени»)
         renderNoTime();
     }
 }
@@ -421,14 +423,14 @@ void CLASS_DEVICE_E7RGB::deferredApplyTask() {
             return;
         }
         // Скорректировать состояние отображения под изменённые настройки
-        bool synced = (NTP.getLastNTPSync() > 0);
+        bool synced = core_sys.timeValid();
         if (d._config.mode != E7_MODE_WORK) {
             d._view = E7_VIEW_NORMAL;
         } else if (d._config.rainEnabled == 0 &&
                    (d._view == E7_VIEW_RAIN || d._view == E7_VIEW_SETTLE)) {
             d._view = E7_VIEW_NORMAL;
             d._forceRedraw = true;
-            d._lastMinute = (uint8_t)minute();
+            d._lastMinute = (uint8_t)minute(core_sys.timeNow());
         } else if (d._config.rainEnabled == 1 && d._view == E7_VIEW_NORMAL && synced == false) {
             d.startRain();
         }
@@ -505,15 +507,16 @@ void e7rgbSecondTask() {
         return;
     }
 
-    bool synced = (NTP.getLastNTPSync() > 0);
+    bool synced = core_sys.timeValid();
 
     if (d._view == E7_VIEW_RAIN) {
         if (synced) {
             d._ntpWasSynced = true;
             uint32_t elapsed = millis() - d._rainStartMs;
             if (elapsed >= (uint32_t)d._config.rainDurMin * 1000u) {
-                d._curH = (uint8_t)hour();
-                d._curM = (uint8_t)minute();
+                time_t t = core_sys.timeNow();
+                d._curH = (uint8_t)hour(t);
+                d._curM = (uint8_t)minute(t);
                 d._settleStartMs = millis();
                 if (d._config.rainSettleDur == 0) {
                     d._view = E7_VIEW_NORMAL;
@@ -532,8 +535,9 @@ void e7rgbSecondTask() {
         uint32_t dur = (uint32_t)d._config.rainSettleDur * 1000u;
         if (dur == 0 || (millis() - d._settleStartMs) >= dur) {
             d._view = E7_VIEW_NORMAL;
-            d._curH = (uint8_t)hour();
-            d._curM = (uint8_t)minute();
+            time_t t = core_sys.timeNow();
+            d._curH = (uint8_t)hour(t);
+            d._curM = (uint8_t)minute(t);
             d._lastMinute = d._curM;
             d.applyMode();
         }
@@ -554,10 +558,25 @@ void e7rgbSecondTask() {
 
     if (synced && !d._ntpWasSynced) {
         d._ntpWasSynced = true;
-        d._forceRedraw = true;
+        // Переход от внутренних часов (00:00) к актуальному времени — анимированно
+        // (если включён timeFx), иначе мгновенная перерисовка.
+        time_t tnow = core_sys.timeNow();
+        uint8_t h = (uint8_t)hour(tnow);
+        uint8_t m = (uint8_t)minute(tnow);
+        if (d._config.timeFx != E7_TFX_OFF && d._config.timeFxDur > 0) {
+            d.startTransition(h, m);
+        } else {
+            d._lastMinute = m;
+            d._curH = h;
+            d._curM = m;
+            d.redrawFrame();
+        }
+        SetTimerTask(e7rgbSecondTask, 1000);
+        return;
     }
-    uint8_t h = (uint8_t)hour();
-    uint8_t m = (uint8_t)minute();
+    time_t tnow = core_sys.timeNow();
+    uint8_t h = (uint8_t)hour(tnow);
+    uint8_t m = (uint8_t)minute(tnow);
     if (d._forceRedraw || m != d._lastMinute) {
         bool immediate = d._forceRedraw;   // первое время/смена настроек — без перехода
         d._forceRedraw = false;

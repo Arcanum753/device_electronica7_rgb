@@ -16,7 +16,7 @@ namespace ns_device_electronica7_rgb {
 bool e7FontPathOk(const String& p);
 
 // Текущее время в формате ЧЧ:ММ
-String e7TimeHhMm();
+String e7TimeHhMm(time_t t);
 
 // Цвет 0xRRGGBB -> "#RRGGBB"
 String e7HexColor(uint32_t c);

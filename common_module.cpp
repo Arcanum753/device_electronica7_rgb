@@ -26,9 +26,9 @@ bool e7FontPathOk(const String& p) {
     return true;
 }
 
-String e7TimeHhMm() {
+String e7TimeHhMm(time_t t) {
     char buf[6];
-    snprintf(buf, sizeof(buf), "%02d:%02d", hour(), minute());
+    snprintf(buf, sizeof(buf), "%02d:%02d", hour(t), minute(t));
     return String(buf);
 }
 
