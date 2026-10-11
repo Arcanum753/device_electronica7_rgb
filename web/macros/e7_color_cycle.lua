@@ -1,12 +1,10 @@
--- E7 RGB: цикл цвета, первая половина (12 шагов разбито на 2 файла по лимиту правил).
-return {
-    desc = "E7 color cycle (steps 1/2)",
-    rules = {
-        { when = { cron = "0 * * * * *"  }, call = "e7.color", args = { 16711680 } },
-        { when = { cron = "5 * * * * *"  }, call = "e7.color", args = { 16744448 } },
-        { when = { cron = "10 * * * * *" }, call = "e7.color", args = { 16776960 } },
-        { when = { cron = "15 * * * * *" }, call = "e7.color", args = { 8453888 } },
-        { when = { cron = "20 * * * * *" }, call = "e7.color", args = { 65280 } },
-        { when = { cron = "25 * * * * *" }, call = "e7.color", args = { 65408 } },
-    },
-}
+-- E7 RGB: С†РёРєР» С†РІРµС‚Р°, РїРµСЂРІР°СЏ РїРѕР»РѕРІРёРЅР° (12 С€Р°РіРѕРІ СЂР°Р·Р±РёС‚Рѕ РЅР° 2 С„Р°Р№Р»Р° РїРѕ Р»РёРјРёС‚Сѓ РїСЂР°РІРёР»).
+-- РќРѕРІС‹Р№ СЃС‚РёР»СЊ: РєР°Р¶РґС‹Р№ С€Р°Рі вЂ” РѕС‚РґРµР»СЊРЅС‹Р№ cron-РѕР±СЂР°Р±РѕС‚С‡РёРє.
+meta{ desc = "E7 color cycle (steps 1/2)" }
+
+every("0 * * * * *",  function() e7.color(16711680) end)
+every("5 * * * * *",  function() e7.color(16744448) end)
+every("10 * * * * *", function() e7.color(16776960) end)
+every("15 * * * * *", function() e7.color(8453888) end)
+every("20 * * * * *", function() e7.color(65280) end)
+every("25 * * * * *", function() e7.color(65408) end)

@@ -1,13 +1,14 @@
--- E7 RGB: слот 0-5 мин. Эффект отображения + смена цвета.
-return {
-    desc = "E7 slot 0-5: effect 0",
-    rules = {
-        { when = { cron = "0 0 * * * *" }, calls = {
-            { name = "e7.effect",     args = { 0 } },
-            { name = "e7.speed",      args = { 20 } },
-            { name = "e7.brightness", args = { 20 } },
-            { name = "e7.color",      args = { 16711680 } },
-        } },
-        { when = { cron = "30 2 * * * *" }, call = "e7.color", args = { 65535 } },
-    },
-}
+-- E7 RGB: СЃР»РѕС‚ 0-5 РјРёРЅ. Р­С„С„РµРєС‚ РѕС‚РѕР±СЂР°Р¶РµРЅРёСЏ + СЃРјРµРЅР° С†РІРµС‚Р°.
+-- РќРѕРІС‹Р№ СЃС‚РёР»СЊ: РѕР±СЂР°Р±РѕС‚С‡РёРєРё СЂРµРіРёСЃС‚СЂРёСЂСѓСЋС‚СЃСЏ РѕРґРёРЅ СЂР°Р·, С‚РµР»Рѕ РЅРµ С‚РёРєР°РµС‚.
+meta{ desc = "E7 slot 0-5: mono" }
+
+every("0 0 * * * *", function()
+    e7.effect = "mono"
+    e7.speed(20)
+    e7.brightness = 20
+    e7.color(16711680)
+end)
+
+every("30 2 * * * *", function()
+    e7.color(65535)
+end)
