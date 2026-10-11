@@ -519,16 +519,16 @@
             fillManualSelects();
             fillDirectionOptions(2);
             fillPaletteBox();
-            loadFonts();
             updateFxUI();
             updateModeUI();
             updateEffectsUI();
+            // Последовательные запросы, без дублей: updateFromInfo() сам запрашивает
+            // /e7rgb/info и (один раз) /e7rgb/fonts; далее — только версии.
             setTimeout(() => {
-                ApplyCVT("/e7rgb/info")
-                    .then(() => updateFromInfo())
+                updateFromInfo()
                     .then(() => ApplyCVT("/e7rgb/ver"))
                     .then(() => ApplyCVT("/system/version"));
-            }, 500);
+            }, 300);
         };
     </script>
 </body>
