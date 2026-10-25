@@ -13,7 +13,7 @@
 - **Папка:** `src/device_electronica7_rgb/`
 - **Флаг активации:** `-D DEVICE_E7RGB=1`
 - **Registry:** `object=device_electronica7_rgb`, `define=DEVICE_E7RGB`, `namespace=e7`, `web=1`, `loop=0`, `res=1`, `prio=70`
-- **Env:** `esp32_electronica7_rgb` и `esp32_electronica7_rgb_macros` (с `module_macros` и таблицей `partitions_esp32_macro.csv`)
+- **Env:** `esp32_electronica7_rgb` и `esp32_electronica7_rgb_macros` (с `module_macros` и единой таблицей `partitions_esp32.csv`)
 - **Только для платформы:** ESP32
 - **Зависит от модулей:** `module_udp`, `module_otaclient`, (`module_macros` — только в macros-env)
 - **Зависит от ядра:** `core_web`, `core_sys`, `core_json`, `core_state`, `core_led`
