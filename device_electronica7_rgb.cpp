@@ -1,6 +1,7 @@
 #include "core_web/FSWebServerLib.h"
 
 #include "core_json/core_json.h"
+#include "core_json/common_module.h"
 
 #include "core_sys/core_sys.h"
 
@@ -91,7 +92,7 @@ void CLASS_DEVICE_E7RGB::begin() {
     core_state.signal("e7.effect", BusValue::en(_config.effect));
     core_state.signal("e7.brightness", BusValue::i32(_config.brightness));
     core_state.signal("e7.speed", BusValue::i32(_config.animSpeed));
-    core_state.signal("e7.color", BusValue::i32((int32_t)_config.digitsColor));
+    core_state.signal("e7.color", BusValue::str(ns_core_json::colorToHex(_config.digitsColor)));
     core_state.signal("e7.text", BusValue::str(_config.manualText));
 
     if (_fs != NULL) { loadFont(); }
@@ -153,7 +154,11 @@ static int e7BusSpeed(void*, int argc, const BusValue* a, BusValue&) {
 static int e7BusColor(void*, int argc, const BusValue* a, BusValue&) {
     if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
-    return device_electronica7_rgb.setDigitsColor((uint32_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+    if (a[0].kind != BusValue::STR) { return BUS_ERR_BAD_VALUE; }
+
+    uint32_t color = 0;
+    if (ns_core_json::colorParseHex(a[0].s, color) == false) { return BUS_ERR_BAD_VALUE; }
+    return device_electronica7_rgb.setDigitsColor(color) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
 static int e7BusText(void*, int argc, const BusValue* a, BusValue&) {
     if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
@@ -182,7 +187,7 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     core_state.regEnum("effect", 5, e7EffectNames, "color effect");
     core_state.regState("brightness", BusValue::I32, "brightness 0..255", true);
     core_state.regState("speed", BusValue::I32, "animation speed 1..50", true);
-    core_state.regState("color", BusValue::I32, "digits color 0xRRGGBB", true);
+    core_state.regState("color", BusValue::STR, "digits color #RRGGBB", true);
     core_state.regState("text", BusValue::STR, "manual text (4 chars)", true);
 
     core_state.regFunc("mode", "i->", "set control mode", e7BusMode, nullptr);
@@ -191,7 +196,7 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     core_state.regFunc("effect", "i->", "set effect", e7BusEffect, nullptr);
     core_state.regFunc("brightness", "i->", "set brightness", e7BusBrightness, nullptr);
     core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
-    core_state.regFunc("color", "i->", "set digits color", e7BusColor, nullptr);
+    core_state.regFunc("color", "s->", "set digits color", e7BusColor, nullptr);
     core_state.regFunc("text", "s->", "set manual text", e7BusText, nullptr);
     core_state.regFunc("save", "->", "persist current settings to config", e7BusSave, nullptr);
     core_state.regFunc("save_mode", "->", "persist only module mode to config", e7BusSaveMode, nullptr);
@@ -233,7 +238,7 @@ bool CLASS_DEVICE_E7RGB::setDigitsColor(uint32_t c) {
     _forceRedraw = true;
     _pendingApply = true;
     SetTask(deferredApplyTask);
-    core_state.signal("e7.color", BusValue::i32((int32_t)_config.digitsColor));
+    core_state.signal("e7.color", BusValue::str(ns_core_json::colorToHex(_config.digitsColor)));
     return true;
 }
 
@@ -312,14 +317,14 @@ void CLASS_DEVICE_E7RGB::handleInfo(AsyncWebServerRequest *request) {
     values += "brightness|"    + String(_config.brightness)    + "|input\n";
     values += "effect|"        + String(_config.effect)        + "|input\n";
     values += "effectDir|"     + String(_config.effectDir)     + "|input\n";
-    values += "digitsColor|"   + ns_device_electronica7_rgb::e7HexColor(_config.digitsColor) + "|input\n";
-    values += "digitsColor2|"  + ns_device_electronica7_rgb::e7HexColor(_config.digitsColor2) + "|input\n";
+    values += "digitsColor|"   + ns_core_json::colorToHex(_config.digitsColor) + "|input\n";
+    values += "digitsColor2|"  + ns_core_json::colorToHex(_config.digitsColor2) + "|input\n";
     values += "animSpeed|"     + String(_config.animSpeed)     + "|input\n";
     values += "colorsCount|"   + String(_config.colorsCount)   + "|input\n";
     values += "cycleMode|"     + String(_config.cycleMode)     + "|input\n";
     for (uint8_t i = 0; i < E7_FX_MAX_COLORS; i++) {
         String pn = "palette" + String(i);
-        values += pn + "|" + ns_device_electronica7_rgb::e7HexColor(_config.palette[i]) + "|input\n";
+        values += pn + "|" + ns_core_json::colorToHex(_config.palette[i]) + "|input\n";
     }
     values += "origin|"        + String(_config.origin)        + "|input\n";
     values += "direction|"     + String(_config.direction)     + "|input\n";
@@ -393,16 +398,17 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
         if (name.startsWith("palette")) {
             int idx = name.substring(7).toInt();   // palette0..palette7
             if (idx >= 0 && idx < E7_FX_MAX_COLORS) {
-                _config.palette[idx] = ns_device_electronica7_rgb::e7HexStringToUint32(val);
+                _config.palette[idx] = ns_core_json::colorParseOrWhite(val);
             }
             continue;
         }
         if (name == "digitsColor") {
-            _config.digitsColor = ns_device_electronica7_rgb::e7HexStringToUint32(val);
+            _config.digitsColor = ns_core_json::colorParseOrWhite(val);
+            core_state.signal("e7.color", BusValue::str(ns_core_json::colorToHex(_config.digitsColor)));
             continue;
         }
         if (name == "digitsColor2") {
-            _config.digitsColor2 = ns_device_electronica7_rgb::e7HexStringToUint32(val);
+            _config.digitsColor2 = ns_core_json::colorParseOrWhite(val);
             continue;
         }
         if (name == "animSpeed") {
@@ -545,8 +551,8 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     _config.brightness  = (uint8_t)constrain(doc["brightness"].as<int>(), 0, 255);
     _config.effect      = (uint8_t)constrain(doc["effect"].as<int>(), E7_EFFECT_MONO, E7_EFFECT_COLORCYCLE);
     _config.effectDir   = (uint8_t)constrain(doc["effectDir"].as<int>(), 0, 5);
-    _config.digitsColor = doc["digitsColor"].as<uint32_t>() & 0xFFFFFF;
-    _config.digitsColor2 = doc["digitsColor2"].as<uint32_t>() & 0xFFFFFF;
+    _config.digitsColor = ns_core_json::colorFromJson(doc["digitsColor"], _config.digitsColor);
+    _config.digitsColor2 = ns_core_json::colorFromJson(doc["digitsColor2"], _config.digitsColor2);
     _config.animSpeed   = (uint8_t)constrain(doc["animSpeed"].as<int>(), 1, 50);
     _config.colorsCount = (uint8_t)constrain(doc["colorsCount"].as<int>(), 1, E7_FX_MAX_COLORS);
     _config.cycleMode   = (uint8_t)constrain(doc["cycleMode"].as<int>(), E7_CYCLE_SEQUENTIAL, E7_CYCLE_RAINBOW);
@@ -554,7 +560,7 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     if (doc["palette"].is<JsonArray>()) {
         JsonArray arr = doc["palette"].as<JsonArray>();
         for (uint8_t i = 0; i < E7_FX_MAX_COLORS; i++) {
-            if (i < arr.size()) { _config.palette[i] = arr[i].as<uint32_t>() & 0xFFFFFF; }
+            _config.palette[i] = ns_core_json::colorFromJson(arr[i], _config.palette[i]);
         }
     }
     _config.origin      = (uint8_t)constrain(doc["origin"].as<int>(), 0, 3);
@@ -612,8 +618,8 @@ bool CLASS_DEVICE_E7RGB::saveConfig() {
     doc["brightness"]  = _config.brightness;
     doc["effect"]      = _config.effect;
     doc["effectDir"]   = _config.effectDir;
-    doc["digitsColor"] = _config.digitsColor;
-    doc["digitsColor2"] = _config.digitsColor2;
+    doc["digitsColor"] = ns_core_json::colorToHex(_config.digitsColor);
+    doc["digitsColor2"] = ns_core_json::colorToHex(_config.digitsColor2);
     doc["animSpeed"]   = _config.animSpeed;
     doc["colorsCount"] = _config.colorsCount;
     doc["cycleMode"]   = _config.cycleMode;
@@ -621,7 +627,7 @@ bool CLASS_DEVICE_E7RGB::saveConfig() {
     JsonArray palArr = doc["palette"].to<JsonArray>();
     palArr.clear();
     for (uint8_t i = 0; i < E7_FX_MAX_COLORS; i++) {
-        palArr.add(_config.palette[i]);
+        palArr.add(ns_core_json::colorToHex(_config.palette[i]));
     }
 
     doc.remove("cells");   // старые поля координатной сетки не сохраняем

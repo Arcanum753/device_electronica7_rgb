@@ -39,7 +39,7 @@
 - FR-E7RGB-5: Публичные сеттеры (`setEffect`, `setBrightness`, `setSpeed`, `setDigitsColor`, `setManualText`, `setBusMode`) применяют изменения в RAM/на экране, но **не сохраняют** конфиг; сигналят на шину; планируют отложенное применение. При смене `e7.mode` через шину `core_state` вызывает `e7.save_mode`, которая сохраняет только `busMode`.
 - FR-E7RGB-6: `saveNow()` и web `handleSave` сохраняют полный конфиг; bus-функция `e7.save` ставит отложенное полное сохранение, `e7.save_mode` сохраняет только режим.
 - FR-E7RGB-7: Режимы шины `off/auto/macro` (`busMode`); bus-запись (кроме `mode` и `save_mode`) разрешена только в `macro`, иначе `BUS_ERR_DENIED`.
-- FR-E7RGB-8: Конфиг `/config_e7rgb.json`: `busMode`, `mode`, `dataPin` (16), `brightness` (25), `effect`, `effectDir`, `digitsColor`, `digitsColor2`, `animSpeed`, `colorsCount`, `cycleMode`, `palette[8]`, `origin`, `direction`, `layout`, `timeFx`, `timeFxFreq`, `timeFxDur`, `timeFxBg`, `rainEnabled`, `rainDurMin`, `rainIntensity`, `rainSettleDur`, `fontFile`, `manualText`.
+- FR-E7RGB-8: Конфиг `/config_e7rgb.json`: `busMode`, `mode`, `dataPin` (16), `brightness` (25), `effect`, `effectDir`, `digitsColor`, `digitsColor2`, `animSpeed`, `colorsCount`, `cycleMode`, `palette[8]`, `origin`, `direction`, `layout`, `timeFx`, `timeFxFreq`, `timeFxDur`, `timeFxBg`, `rainEnabled`, `rainDurMin`, `rainIntensity`, `rainSettleDur`, `fontFile`, `manualText`. Цвета — строки `#RRGGBB` (регистр ввода любой, вывод в верхнем); числа не принимаются, ошибка чтения строки даёт `#FFFFFF`.
 - FR-E7RGB-9: Аппаратно 112 светодиодов WS2812 (7×16) через NeoPixelBus; RMT при `-D E7_USE_RMT=1`, иначе I2S0; `dataPin=-1` — выключено.
 
 ## Аппаратные интерфейсы
@@ -60,8 +60,10 @@
 
 ## Ресурсы шины (namespace `e7`)
 
-- состояния: `e7.mode` (ENUM off/auto/macro), `e7.effect` (ENUM), `e7.brightness` (I32), `e7.speed` (I32), `e7.color` (I32), `e7.text` (STR);
+- состояния: `e7.mode` (ENUM off/auto/macro), `e7.effect` (ENUM), `e7.brightness` (I32), `e7.speed` (I32), `e7.color` (STR, `#RRGGBB`), `e7.text` (STR);
 - функции: `e7.mode`, `e7.effect`, `e7.brightness`, `e7.speed`, `e7.color`, `e7.text`, `e7.save`, `e7.save_mode`.
+- `e7.color` принимает только строку `#RRGGBB`; невалидная строка -> `BUS_ERR_BAD_VALUE`,
+  текущий цвет не меняется.
 
 ## Слоистая структура
 

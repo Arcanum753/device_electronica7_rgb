@@ -18,14 +18,8 @@ bool e7FontPathOk(const String& p);
 // Текущее время в формате ЧЧ:ММ
 String e7TimeHhMm(time_t t);
 
-// Цвет 0xRRGGBB -> "#RRGGBB"
-String e7HexColor(uint32_t c);
-
 // Допустимая кратность минут для эффекта смены времени
 bool e7TfxFreqOk(int f);
-
-// Преобразование hex-строки (#RRGGBB, 0xRRGGBB или RRGGBB) в uint32
-uint32_t e7HexStringToUint32(const String& hexStr);
 
 // Помощники спецэффектов окраски
 void     e7SeedRng();

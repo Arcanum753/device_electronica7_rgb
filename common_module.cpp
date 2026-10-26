@@ -4,7 +4,6 @@
 #include "common/TimeLib.h"
 
 #include <math.h>
-#include <stdlib.h>
 #include <stdio.h>
 
 // ============================================================
@@ -32,24 +31,9 @@ String e7TimeHhMm(time_t t) {
     return String(buf);
 }
 
-String e7HexColor(uint32_t c) {
-    char hex[8];
-    snprintf(hex, sizeof(hex), "#%06X", (unsigned int)(c & 0xFFFFFF));
-    return String(hex);
-}
-
 // Допустимая кратность минут для эффекта смены времени
 bool e7TfxFreqOk(int f) {
     return (f == 1 || f == 3 || f == 5 || f == 10 || f == 15 || f == 20 || f == 40);
-}
-
-uint32_t e7HexStringToUint32(const String& hexStr) {
-    if (hexStr.length() == 0) { return 0; }
-    String clean = hexStr;
-    clean.replace("#", "");
-    clean.replace("0x", "");
-    clean.replace("0X", "");
-    return (uint32_t)strtoul(clean.c_str(), NULL, 16);
 }
 
 // ============================================================

@@ -2,9 +2,9 @@
 -- РќРѕРІС‹Р№ СЃС‚РёР»СЊ: РєР°Р¶РґС‹Р№ С€Р°Рі вЂ” РѕС‚РґРµР»СЊРЅС‹Р№ cron-РѕР±СЂР°Р±РѕС‚С‡РёРє.
 meta{ desc = "E7 color cycle (steps 1/2)" }
 
-every("0 * * * * *",  function() e7.color(16711680) end)
-every("5 * * * * *",  function() e7.color(16744448) end)
-every("10 * * * * *", function() e7.color(16776960) end)
-every("15 * * * * *", function() e7.color(8453888) end)
-every("20 * * * * *", function() e7.color(65280) end)
-every("25 * * * * *", function() e7.color(65408) end)
+every("0 * * * * *",  function() e7.color("#FF0000") end)
+every("5 * * * * *",  function() e7.color("#FF8000") end)
+every("10 * * * * *", function() e7.color("#FFFF00") end)
+every("15 * * * * *", function() e7.color("#80FF00") end)
+every("20 * * * * *", function() e7.color("#00FF00") end)
+every("25 * * * * *", function() e7.color("#00FF80") end)
