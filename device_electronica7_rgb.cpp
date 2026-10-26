@@ -170,6 +170,10 @@ static int e7BusSave(void*, int argc, const BusValue* a, BusValue&) {
     device_electronica7_rgb.saveNow();
     return BUS_OK;
 }
+static int e7BusSaveMode(void*, int argc, const BusValue* a, BusValue&) {
+    (void)argc; (void)a;
+    return device_electronica7_rgb.saveModeConfig() ? BUS_OK : BUS_ERR_INTERNAL;
+}
 
 void CLASS_DEVICE_E7RGB::register_resources() {
     DEBUGE7RGB("%s\r\n", __FUNCTION__);
@@ -182,14 +186,15 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     core_state.regState("text", BusValue::STR, "manual text (4 chars)", true);
 
     core_state.regFunc("mode", "i->", "set control mode", e7BusMode, nullptr);
-    // Все bus-функции, кроме mode, работают только в режиме MACRO.
-    // mode — канал управления режимом (принимается всегда).
+    // Все bus-функции записи, кроме mode и save_mode, работают только в режиме MACRO.
+    // mode — канал управления режимом, save_mode — сохранение режима (всегда доступны).
     core_state.regFunc("effect", "i->", "set effect", e7BusEffect, nullptr);
     core_state.regFunc("brightness", "i->", "set brightness", e7BusBrightness, nullptr);
     core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
     core_state.regFunc("color", "i->", "set digits color", e7BusColor, nullptr);
     core_state.regFunc("text", "s->", "set manual text", e7BusText, nullptr);
     core_state.regFunc("save", "->", "persist current settings to config", e7BusSave, nullptr);
+    core_state.regFunc("save_mode", "->", "persist only module mode to config", e7BusSaveMode, nullptr);
     // Значения публикуются в begin() после loadConfig().
 }
 
@@ -634,6 +639,19 @@ bool CLASS_DEVICE_E7RGB::saveConfig() {
     doc["fontFile"]    = _config.fontFile;
     doc["manualText"]  = _config.manualText;
 
+    return core_json.jsonFileSaveDoc(CONFIG_FILE_E7RGB, doc);
+}
+
+// Отдельная команда сохранения режима: при существующем конфиге меняет только
+// busMode, не трогая остальные параметры.
+bool CLASS_DEVICE_E7RGB::saveModeConfig() {
+    DEBUGE7RGB("%s: busMode=%d\r\n", __FUNCTION__, _config.busMode);
+    JsonDocument doc;
+    if (core_json.jsonFileLoadDoc(CONFIG_FILE_E7RGB, doc) == false) {
+        // Файла нет: создаём штатный полный конфиг из текущих значений/дефолтов.
+        return saveConfig();
+    }
+    doc["busMode"] = _config.busMode;
     return core_json.jsonFileSaveDoc(CONFIG_FILE_E7RGB, doc);
 }
 
