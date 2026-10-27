@@ -180,6 +180,10 @@ static int e7BusSaveMode(void*, int argc, const BusValue* a, BusValue&) {
     return device_electronica7_rgb.saveModeConfig() ? BUS_OK : BUS_ERR_INTERNAL;
 }
 
+// Ресурсы шины (namespace e7): состояния mode (ENUM off/auto/macro), effect (ENUM
+// mono/rainbow/grad_static/grad_dynamic/colorcycle), brightness, speed, color, text;
+// функции mode, effect, brightness, speed, color, text, save, save_mode. Каталог
+// /macros/resources.json собирается при сборке ФС (python/gen_resources_catalog.py).
 void CLASS_DEVICE_E7RGB::register_resources() {
     DEBUGE7RGB("%s\r\n", __FUNCTION__);
 
