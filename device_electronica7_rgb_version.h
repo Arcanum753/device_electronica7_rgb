@@ -1,6 +1,6 @@
 // Auto-generated version file for module: device_electronica7_rgb
-// Generated: 2026-10-27 08:17
-// Environment: esp32_clock-mech
+// Generated: 2026-10-30 21:41
+// Environment: esp32_electronica7_rgb_macros
 
 #ifndef DEVICE_ELECTRONICA7_RGB_VERSION_H
 #define DEVICE_ELECTRONICA7_RGB_VERSION_H
@@ -10,36 +10,36 @@
 // ============================================================
 
 // Числовая версия (для сравнений)
-#define DEVICE_ELECTRONICA7_RGB_VERSION 16
+#define DEVICE_ELECTRONICA7_RGB_VERSION 17
 
 // Строковая версия
-#define DEVICE_ELECTRONICA7_RGB_VERSION_STR "16"
+#define DEVICE_ELECTRONICA7_RGB_VERSION_STR "17"
 
 // Хэш последнего обработанного коммита кода (без учёта *_version.h)
-#define DEVICE_ELECTRONICA7_RGB_COMMIT_HASH "a797489fa444e7560c3a2b082dfbb9171cddc756"
+#define DEVICE_ELECTRONICA7_RGB_COMMIT_HASH "e6c395bcc41f9c594672c5d5d3b396c13c71d131"
 
 // ============================================================
 // ДАТА ПОСЛЕДНЕГО ИЗМЕНЕНИЯ
 // ============================================================
 
 // Дата в формате yyyy.mm.dd hh.mm (как строка)
-#define DEVICE_ELECTRONICA7_RGB_COMMIT_DATE_STR "2026.10.27 08:05"
+#define DEVICE_ELECTRONICA7_RGB_COMMIT_DATE_STR "2026.10.30 20:09"
 
 // Компоненты даты (для числовых операций)
 #define DEVICE_ELECTRONICA7_RGB_COMMIT_YEAR 2026
 #define DEVICE_ELECTRONICA7_RGB_COMMIT_MONTH 10
-#define DEVICE_ELECTRONICA7_RGB_COMMIT_DAY 27
-#define DEVICE_ELECTRONICA7_RGB_COMMIT_HOUR 8
-#define DEVICE_ELECTRONICA7_RGB_COMMIT_MINUTE 5
+#define DEVICE_ELECTRONICA7_RGB_COMMIT_DAY 30
+#define DEVICE_ELECTRONICA7_RGB_COMMIT_HOUR 20
+#define DEVICE_ELECTRONICA7_RGB_COMMIT_MINUTE 9
 
 // Полная дата в формате YYYY-MM-DD HH:MM (для отладки)
-#define DEVICE_ELECTRONICA7_RGB_COMMIT_DATE "2026-10-27 08:05"
+#define DEVICE_ELECTRONICA7_RGB_COMMIT_DATE "2026-10-30 20:09"
 
 // ============================================================
 // ИНФОРМАЦИЯ О ГЕНЕРАЦИИ
 // ============================================================
 
-#define DEVICE_ELECTRONICA7_RGB_GENERATED_TIME "2026-10-27 08:17"
-#define DEVICE_ELECTRONICA7_RGB_GENERATED_TIMESTAMP "20261027_081755"
+#define DEVICE_ELECTRONICA7_RGB_GENERATED_TIME "2026-10-30 21:41"
+#define DEVICE_ELECTRONICA7_RGB_GENERATED_TIMESTAMP "20261030_214143"
 
 #endif // DEVICE_ELECTRONICA7_RGB_VERSION_H
