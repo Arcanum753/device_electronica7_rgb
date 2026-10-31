@@ -153,6 +153,9 @@
                         onchange="onBrightness(this.value)">
                         <span id="bVal">25</span>
                     </td></tr>
+                <tr><td class="label">Моргание точек, с (0 — всегда):</td>
+                    <td><input type="number" id="colonBlink" min="0" max="10" step="1"
+                               value="1" style="width:80px;"></td></tr>
                 <tr><td class="label">Шрифт / Font:</td>
                     <td><select id="fontFile"></select></td></tr>
                 <tr><td class="label">Начало координат:</td>
@@ -434,6 +437,7 @@
             }
             p += '&dataPin=' + encodeURIComponent(get('dataPin'))
                   + '&brightness=' + get('brightness')
+                  + '&colonBlink=' + get('colonBlink')
                   + '&origin=' + get('origin')
                   + '&direction=' + get('direction')
                   + '&layout=' + get('layout')

@@ -1,5 +1,7 @@
 #include "core_web/FSWebServerLib.h"
 
+#include <math.h>
+
 #include "device_electronica7_rgb.h"
 #include "common_module.h"
 #include "common/common.h"
@@ -159,6 +161,7 @@ void CLASS_DEVICE_E7RGB::drawMaskFx(const uint8_t mask[E7_HEIGHT][E7_WIDTH]) {
             compositePixel(x, y, color, 1.0f);
         }
     }
+    drawDots(dotBlinkOn() ? 1.0f : 0.0f);
     _matrix.show();
 }
 
@@ -299,6 +302,15 @@ void CLASS_DEVICE_E7RGB::drawTransition() {
             compositePixel(x, y, color, level);
         }
     }
+    // Точки в переходе: мигание приостановлено, участвуют в анимации.
+    float dotLevel = 1.0f;
+    bool dotWhite = false;
+    if (_transType == E7_TFX_FADE) {
+        dotLevel = (t < 0.5f) ? (1.0f - 2.0f * t) : (2.0f * t - 1.0f);
+    } else if (_transType == E7_TFX_FLASH && t >= 0.45f && t < 0.65f) {
+        dotWhite = true;
+    }
+    drawDots(dotLevel, dotWhite);
     _matrix.show();
 }
 
@@ -376,6 +388,8 @@ void CLASS_DEVICE_E7RGB::drawRain(bool settleMode, float settleP, const uint8_t 
             compositePixel(x, y, color, levels[y][x]);
         }
     }
+    // При оседании точки проявляются вместе с цифрами; в чистом дожде погашены.
+    if (settleMode) { drawDots(settleP); }
     _matrix.show();
 }
 
@@ -387,6 +401,34 @@ void CLASS_DEVICE_E7RGB::drawSettle() {
     if (p < 0.0f) { p = 0.0f; }
     if (p > 1.0f) { p = 1.0f; }
     drawRain(true, p, target);
+}
+
+// ============================================================
+// Разделительные точки ЧЧ/ММ (LED 112 — нижняя, 113 — верхняя)
+// ============================================================
+
+// Моргание: 0 — горят всегда; N — полный цикл N секунд,
+// первые N/2 горят, вторые N/2 погашены. Фаза от millis().
+bool CLASS_DEVICE_E7RGB::dotBlinkOn() {
+    if (_config.colonBlink == 0) { return true; }
+    float cycle = (float)_config.colonBlink;
+    float phase = fmodf((float)millis() / 1000.0f, cycle);
+    return phase < cycle * 0.5f;
+}
+
+// Уровень 0..1: 0 — точки погашены. white — белый цвет (вспышка перехода).
+void CLASS_DEVICE_E7RGB::drawDots(float level, bool white) {
+    if (_matrix.ready() == false) { return; }
+    if (level < 0.0f) { level = 0.0f; }
+    if (level > 1.0f) { level = 1.0f; }
+    uint8_t b = (uint8_t)((float)_config.brightness * level);
+    uint32_t cUpper = white ? 0xFFFFFF
+                            : ns_device_electronica7_rgb::e7FxColor(_config, 8, 2, _animPhase, _fxOrder);
+    uint32_t cLower = white ? 0xFFFFFF
+                            : ns_device_electronica7_rgb::e7FxColor(_config, 8, 4, _animPhase, _fxOrder);
+    _matrix.setColonDot(true,  cUpper, b);
+    _matrix.setColonDot(false, cLower, b);
+    _dotOn = (level > 0.003f);
 }
 
 // Отложенное применение изменений (паттерн module_rgb):
@@ -419,6 +461,7 @@ void CLASS_DEVICE_E7RGB::deferredApplyTask() {
         if (d._config.busMode == E7_BUS_OFF) {
             d._matrix.clear();
             d._matrix.show();
+            d._dotOn = false;
             d._pendingApply = false;
             return;
         }
@@ -483,6 +526,14 @@ void e7rgbAnimTask() {
     } else if (phaseAdvanced && ns_device_electronica7_rgb::e7FxAnimated(d._config.effect)) {
         // обычный кадр перерисовываем только при смене фазы цвета
         d.applyMode();
+    } else {
+        // Обычный кадр: для неанимированных эффектов перерисовки нет,
+        // поэтому точки обновляем отдельно (только при смене фазы моргания).
+        bool on = d.dotBlinkOn();
+        if (on != d._dotOn) {
+            d.drawDots(on ? 1.0f : 0.0f);
+            d._matrix.show();
+        }
     }
 
     SetTimerTask(e7rgbAnimTask, E7_FX_RENDER_MS);

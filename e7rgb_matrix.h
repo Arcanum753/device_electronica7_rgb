@@ -4,6 +4,8 @@
 // ============================================================
 // e7rgb_matrix.h — драйвер адресной RGB-матрицы 7x16 (112 LEDs)
 // для device_electronica7_rgb (файл общего назначения).
+// Вся лента — 114 LED: 112 матрицы + 2 разделительные точки
+// ЧЧ/ММ в конце цепочки (112 — нижняя, 113 — верхняя).
 //
 // Вывод: NeoPixelBus. Метод переключается дефайном:
 //   - по умолчанию I2S+DMA (NeoEsp32I2s0Ws2812xMethod), ESP32 classic;
@@ -26,7 +28,13 @@
 
 #define E7_WIDTH         16
 #define E7_HEIGHT         7
-#define E7_LEDS    (E7_WIDTH * E7_HEIGHT)   // 112
+#define E7_MATRIX_LEDS    (E7_WIDTH * E7_HEIGHT)   // 112 (сама матрица)
+#define E7_COLON_DOTS     2                        // разделительные точки ЧЧ/ММ
+#define E7_LEDS           (E7_MATRIX_LEDS + E7_COLON_DOTS)   // 114 (вся лента)
+
+// Точки физически последние в цепочке: 112 — нижняя, 113 — верхняя.
+#define E7_COLON_LOWER_IDX E7_MATRIX_LEDS          // 112, логическая y=4
+#define E7_COLON_UPPER_IDX (E7_MATRIX_LEDS + 1)    // 113, логическая y=2
 
 // Начало координат: угол панели, где стоит первый светодиод
 #define E7_ORIGIN_TOP_LEFT      0   // ВЛ
@@ -59,6 +67,7 @@ public:
     void setTopology(uint8_t origin, uint8_t direction, uint8_t layout);
     uint16_t ledIndex(int x, int y);                  // логические координаты -> LED
     void setPixel(int x, int y, uint32_t rgb, uint8_t brightness);
+    void setColonDot(bool upper, uint32_t rgb, uint8_t brightness);  // точка ЧЧ/ММ
     void clear();
     void show();
     bool ready() const;

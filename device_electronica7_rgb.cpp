@@ -41,6 +41,7 @@ CLASS_DEVICE_E7RGB::CLASS_DEVICE_E7RGB() {
     _rainStartMs = 0;
     _rainRampStartMs = 0;
     _fxAccumMs = 0;
+    _dotOn = false;
     for (int i = 0; i < E7_WIDTH; i++) {
         _rainHead[i] = 0.0f;
         _rainSpeed[i] = 0.0f;
@@ -82,6 +83,7 @@ void CLASS_DEVICE_E7RGB::begin() {
     _transType = E7_TFX_OFF;
     _settleStartMs = 0;
     _fxAccumMs = 0;
+    _dotOn = false;
     memset(_transRand, 0, sizeof(_transRand));
 
     defaultConfig();
@@ -91,6 +93,7 @@ void CLASS_DEVICE_E7RGB::begin() {
     core_state.signal("e7.mode", BusValue::en(_config.busMode));
     core_state.signal("e7.effect", BusValue::en(_config.effect));
     core_state.signal("e7.brightness", BusValue::i32(_config.brightness));
+    core_state.signal("e7.colon_blink", BusValue::i32(_config.colonBlink));
     core_state.signal("e7.speed", BusValue::i32(_config.animSpeed));
     core_state.signal("e7.color", BusValue::str(ns_core_json::colorToHex(_config.digitsColor)));
     core_state.signal("e7.text", BusValue::str(_config.manualText));
@@ -100,7 +103,11 @@ void CLASS_DEVICE_E7RGB::begin() {
     initMatrix();
 
     _animPhase = 0.0f;
-    if (_config.mode == E7_MODE_WORK && _config.rainEnabled == 1 && !core_sys.timeValid()) {
+    if (_config.busMode == E7_BUS_OFF) {
+        // Режим off: матрица и точки остаются погашенными с момента старта.
+        _matrix.clear();
+        _matrix.show();
+    } else if (_config.mode == E7_MODE_WORK && _config.rainEnabled == 1 && !core_sys.timeValid()) {
         startRain();
     } else {
         applyMode();
@@ -146,6 +153,11 @@ static int e7BusBrightness(void*, int argc, const BusValue* a, BusValue&) {
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setBrightness((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
+static int e7BusColonBlink(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setColonBlink((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
 static int e7BusSpeed(void*, int argc, const BusValue* a, BusValue&) {
     if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
@@ -190,6 +202,7 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     core_state.regEnum("mode", 3, e7BusModeNames, "device control mode (off/auto/macro)");
     core_state.regEnum("effect", 5, e7EffectNames, "color effect");
     core_state.regState("brightness", BusValue::I32, "brightness 0..255", true);
+    core_state.regState("colon_blink", BusValue::I32, "colon blink period, s (0=always on)", true);
     core_state.regState("speed", BusValue::I32, "animation speed 1..50", true);
     core_state.regState("color", BusValue::STR, "digits color #RRGGBB", true);
     core_state.regState("text", BusValue::STR, "manual text (4 chars)", true);
@@ -199,6 +212,7 @@ void CLASS_DEVICE_E7RGB::register_resources() {
     // mode — канал управления режимом, save_mode — сохранение режима (всегда доступны).
     core_state.regFunc("effect", "i->", "set effect", e7BusEffect, nullptr);
     core_state.regFunc("brightness", "i->", "set brightness", e7BusBrightness, nullptr);
+    core_state.regFunc("colon_blink", "i->", "set colon blink period", e7BusColonBlink, nullptr);
     core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
     core_state.regFunc("color", "s->", "set digits color", e7BusColor, nullptr);
     core_state.regFunc("text", "s->", "set manual text", e7BusText, nullptr);
@@ -225,6 +239,15 @@ bool CLASS_DEVICE_E7RGB::setBrightness(uint8_t b) {
     _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.brightness", BusValue::i32(b));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setColonBlink(uint8_t s) {
+    if (s > E7_COLON_BLINK_MAX) { return false; }
+    _config.colonBlink = s;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.colon_blink", BusValue::i32(s));
     return true;
 }
 
@@ -319,6 +342,7 @@ void CLASS_DEVICE_E7RGB::handleInfo(AsyncWebServerRequest *request) {
     values += "mode|"          + String(_config.mode)          + "|input\n";
     values += "dataPin|"       + String(_config.dataPin)       + "|input\n";
     values += "brightness|"    + String(_config.brightness)    + "|input\n";
+    values += "colonBlink|"    + String(_config.colonBlink)    + "|input\n";
     values += "effect|"        + String(_config.effect)        + "|input\n";
     values += "effectDir|"     + String(_config.effectDir)     + "|input\n";
     values += "digitsColor|"   + ns_core_json::colorToHex(_config.digitsColor) + "|input\n";
@@ -381,6 +405,10 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
         }
         if (name == "brightness") {
             _config.brightness = (uint8_t)constrain(val.toInt(), 0, 255);
+            continue;
+        }
+        if (name == "colonBlink") {
+            _config.colonBlink = (uint8_t)constrain(val.toInt(), 0, E7_COLON_BLINK_MAX);
             continue;
         }
         if (name == "effect") {
@@ -514,6 +542,7 @@ void CLASS_DEVICE_E7RGB::defaultConfig() {
     _config.mode        = E7_MODE_WORK;
     _config.dataPin     = 16;
     _config.brightness  = 25;
+    _config.colonBlink  = 1;
     _config.effect      = E7_EFFECT_MONO;
     _config.effectDir   = E7_FXDIR_TL;
     _config.digitsColor = 0xFF0000;
@@ -553,6 +582,9 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     _config.mode        = (uint8_t)constrain(doc["mode"].as<int>(), E7_MODE_WORK, E7_MODE_MANUAL);
     _config.dataPin     = (int16_t)constrain(doc["dataPin"].as<int>(), -1, 33);
     _config.brightness  = (uint8_t)constrain(doc["brightness"].as<int>(), 0, 255);
+    if (doc["colonBlink"].is<int>()) {
+        _config.colonBlink = (uint8_t)constrain(doc["colonBlink"].as<int>(), 0, E7_COLON_BLINK_MAX);
+    }
     _config.effect      = (uint8_t)constrain(doc["effect"].as<int>(), E7_EFFECT_MONO, E7_EFFECT_COLORCYCLE);
     _config.effectDir   = (uint8_t)constrain(doc["effectDir"].as<int>(), 0, 5);
     _config.digitsColor = ns_core_json::colorFromJson(doc["digitsColor"], _config.digitsColor);
@@ -620,6 +652,7 @@ bool CLASS_DEVICE_E7RGB::saveConfig() {
     doc["mode"]        = _config.mode;
     doc["dataPin"]     = _config.dataPin;
     doc["brightness"]  = _config.brightness;
+    doc["colonBlink"]  = _config.colonBlink;
     doc["effect"]      = _config.effect;
     doc["effectDir"]   = _config.effectDir;
     doc["digitsColor"] = ns_core_json::colorToHex(_config.digitsColor);

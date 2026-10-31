@@ -37,6 +37,7 @@
 #define E7_CYCLE_RAINBOW    2      // по радуге (палитра не используется)
 
 #define E7_FX_MAX_COLORS    8      // максимум цветов в палитре
+#define E7_COLON_BLINK_MAX  10     // макс. период моргания точек, с (0 = всегда)
 
 // Направления перелива/градиента
 #define E7_FXDIR_TL   0   // из верхнего левого угла (по диагонали)
@@ -80,6 +81,7 @@ typedef struct {
     uint8_t  mode;          // E7_MODE_WORK / E7_MODE_MANUAL
     int16_t  dataPin;       // пин данных (по умолчанию 16, -1 = выкл.)
     uint8_t  brightness;    // 0..255 (по умолчанию 25; масштабирование каналов)
+    uint8_t  colonBlink;    // 0..10 с — период моргания точек ЧЧ/ММ (0 = всегда)
     uint8_t  effect;        // E7_EFFECT_*
     uint8_t  effectDir;     // E7_FXDIR_* — направление перелива/градиента
     uint32_t digitsColor;   // 0xRRGGBB — цвет 1 (моноцвет / начало градиента)

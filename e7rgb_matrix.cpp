@@ -78,7 +78,7 @@ uint16_t E7Matrix::ledIndex(int x, int y) {
     } else {
         idx = (uint16_t)(thisY * matrixW + (matrixW - thisX - 1));
     }
-    if (idx >= E7_LEDS) { idx = 0; }
+    if (idx >= E7_MATRIX_LEDS) { idx = 0; }
     return idx;
 }
 
@@ -86,6 +86,17 @@ void E7Matrix::setPixel(int x, int y, uint32_t rgb, uint8_t brightness) {
     if (_strip == NULL) { return; }
     if (x < 0 || x >= E7_WIDTH || y < 0 || y >= E7_HEIGHT) { return; }
     uint16_t idx = ledIndex(x, y);
+    float b = brightness / 255.0f;
+    uint16_t r = (uint16_t)(((rgb >> 16) & 0xFF) * b);
+    uint16_t g = (uint16_t)(((rgb >> 8)  & 0xFF) * b);
+    uint16_t bl = (uint16_t)((rgb & 0xFF) * b);
+    _strip->SetPixelColor(idx, RgbColor(r, g, bl));
+}
+
+// Разделительная точка: 112 — нижняя, 113 — верхняя.
+void E7Matrix::setColonDot(bool upper, uint32_t rgb, uint8_t brightness) {
+    if (_strip == NULL) { return; }
+    uint16_t idx = upper ? E7_COLON_UPPER_IDX : E7_COLON_LOWER_IDX;
     float b = brightness / 255.0f;
     uint16_t r = (uint16_t)(((rgb >> 16) & 0xFF) * b);
     uint16_t g = (uint16_t)(((rgb >> 8)  & 0xFF) * b);

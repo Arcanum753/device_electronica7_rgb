@@ -39,14 +39,15 @@
 - FR-E7RGB-5: Публичные сеттеры (`setEffect`, `setBrightness`, `setSpeed`, `setDigitsColor`, `setManualText`, `setBusMode`) применяют изменения в RAM/на экране, но **не сохраняют** конфиг; сигналят на шину; планируют отложенное применение. При смене `e7.mode` через шину `core_state` вызывает `e7.save_mode`, которая сохраняет только `busMode`.
 - FR-E7RGB-6: `saveNow()` и web `handleSave` сохраняют полный конфиг; bus-функция `e7.save` ставит отложенное полное сохранение, `e7.save_mode` сохраняет только режим.
 - FR-E7RGB-7: Режимы шины `off/auto/macro` (`busMode`); bus-запись (кроме `mode` и `save_mode`) разрешена только в `macro`, иначе `BUS_ERR_DENIED`.
-- FR-E7RGB-8: Конфиг `/config_e7rgb.json`: `busMode`, `mode`, `dataPin` (16), `brightness` (25), `effect`, `effectDir`, `digitsColor`, `digitsColor2`, `animSpeed`, `colorsCount`, `cycleMode`, `palette[8]`, `origin`, `direction`, `layout`, `timeFx`, `timeFxFreq`, `timeFxDur`, `timeFxBg`, `rainEnabled`, `rainDurMin`, `rainIntensity`, `rainSettleDur`, `fontFile`, `manualText`. Цвета — строки `#RRGGBB` (регистр ввода любой, вывод в верхнем); числа не принимаются, ошибка чтения строки даёт `#FFFFFF`.
-- FR-E7RGB-9: Аппаратно 112 светодиодов WS2812 (7×16) через NeoPixelBus; RMT при `-D E7_USE_RMT=1`, иначе I2S0; `dataPin=-1` — выключено.
+- FR-E7RGB-8: Конфиг `/config_e7rgb.json`: `busMode`, `mode`, `dataPin` (16), `brightness` (25), `colonBlink` (1, 0..10 с), `effect`, `effectDir`, `digitsColor`, `digitsColor2`, `animSpeed`, `colorsCount`, `cycleMode`, `palette[8]`, `origin`, `direction`, `layout`, `timeFx`, `timeFxFreq`, `timeFxDur`, `timeFxBg`, `rainEnabled`, `rainDurMin`, `rainIntensity`, `rainSettleDur`, `fontFile`, `manualText`. Цвета — строки `#RRGGBB` (регистр ввода любой, вывод в верхнем); числа не принимаются, ошибка чтения строки даёт `#FFFFFF`.
+- FR-E7RGB-9: Аппаратно 114 светодиодов WS2812 через NeoPixelBus: 112 матрицы 7×16 + 2 разделительные точки ЧЧ/ММ в конце цепочки (индекс 112 — нижняя, 113 — верхняя). RMT при `-D E7_USE_RMT=1`, иначе I2S0; `dataPin=-1` — выключено.
+- FR-E7RGB-10: Разделительные точки ЧЧ/ММ горят цветом текущего эффекта (`e7FxColor` при `x=8`, `y=2`/`y=4`) и общей яркостью. `colonBlink`: 0 — горят всегда; `N>0` — полный цикл N секунд (N/2 горят, N/2 погашены). В обычном кадре (включая ручной режим и прочерки «нет времени») точки мигают; в переходе смены времени мигание приостановлено, в `FADE` точки гаснут вместе с цифрами, в `FLASH` вспыхивают белым; при оседании дождя проявляются вместе с цифрами; в чистом «дожде» и при `busMode=off` погашены.
 
 ## Аппаратные интерфейсы
 
 | Интерфейс | Выводы по умолчанию | Примечание |
 |-----------|---------------------|------------|
-| WS2812 (матрица) | DATA=16 (`dataPin`) | 112 светодиодов 7×16; NeoPixelBus (RMT при `-D E7_USE_RMT=1`, иначе I2S0); `dataPin=-1` — выключено |
+| WS2812 (матрица) | DATA=16 (`dataPin`) | 114 светодиодов: 112 матрицы 7×16 + 2 точки ЧЧ/ММ (112 — нижняя, 113 — верхняя); NeoPixelBus (RMT при `-D E7_USE_RMT=1`, иначе I2S0); `dataPin=-1` — выключено |
 
 ## Веб-интерфейс
 
@@ -60,8 +61,8 @@
 
 ## Ресурсы шины (namespace `e7`)
 
-- состояния: `e7.mode` (ENUM off/auto/macro), `e7.effect` (ENUM), `e7.brightness` (I32), `e7.speed` (I32), `e7.color` (STR, `#RRGGBB`), `e7.text` (STR);
-- функции: `e7.mode`, `e7.effect`, `e7.brightness`, `e7.speed`, `e7.color`, `e7.text`, `e7.save`, `e7.save_mode`.
+- состояния: `e7.mode` (ENUM off/auto/macro), `e7.effect` (ENUM), `e7.brightness` (I32), `e7.colon_blink` (I32, 0..10), `e7.speed` (I32), `e7.color` (STR, `#RRGGBB`), `e7.text` (STR);
+- функции: `e7.mode`, `e7.effect`, `e7.brightness`, `e7.colon_blink`, `e7.speed`, `e7.color`, `e7.text`, `e7.save`, `e7.save_mode`.
 - `e7.color` принимает только строку `#RRGGBB`; невалидная строка -> `BUS_ERR_BAD_VALUE`,
   текущий цвет не меняется.
 
@@ -82,6 +83,7 @@
 ## Критерии приёмки
 
 - AC-12: `device_electronica7_rgb`: `call("e7.save")` и веб-Save персистят полный конфиг, `call("e7.save_mode")` — только `busMode`, а `set("e7.effect", ...)` — нет; режимы `off/auto/macro` соблюдаются и переживают перезагрузку.
+- AC-13: точки ЧЧ/ММ (LED 112 — нижняя, 113 — верхняя) горят цветом эффекта; `colonBlink=0` — постоянно, `1` — 0.5 с / 0.5 с, `10` — 5 с / 5 с; значение сохраняется веб-Save и `e7.save`, а `set("e7.colon_blink", ...)` — нет; в переходах мигание приостановлено.
 
 ## Ссылки
 

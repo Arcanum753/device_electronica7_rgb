@@ -30,6 +30,7 @@ public:
     // Публичное API для ресурсной шины
     bool setEffect(uint8_t e);
     bool setBrightness(uint8_t b);
+    bool setColonBlink(uint8_t s);
     bool setSpeed(uint8_t s);
     bool setDigitsColor(uint32_t c);
     bool setManualText(const String& t);
@@ -79,6 +80,10 @@ private:
     void drawRain(bool settleMode, float settleP, const uint8_t target[E7_HEIGHT][E7_WIDTH]);
     void drawSettle();
 
+    // Разделительные точки ЧЧ/ММ (LED 112/113)
+    bool dotBlinkOn();                                 // текущая фаза моргания
+    void drawDots(float level, bool white = false);    // зажечь/погасить обе точки
+
     static void deferredApplyTask();
 
     friend void e7rgbSecondTask();
@@ -116,6 +121,7 @@ protected:
     float    _rainSpeed[E7_WIDTH];  // скорость падения (пикс/тик)
     bool     _rainColOn[E7_WIDTH];  // активность столбца
     uint32_t _fxAccumMs;      // накопитель времени фазы цвета
+    bool     _dotOn;          // фактически нарисованное состояние точек
 };
 
 extern CLASS_DEVICE_E7RGB device_electronica7_rgb;
