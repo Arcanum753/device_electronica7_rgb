@@ -69,9 +69,11 @@
 ## Слоистая структура
 
 Из `../../LAYERS.md`: `device_electronica7_rgb` — матрица E7 RGB: рендер, эффекты, переходы,
-«дождь»; уже есть `e7rgb_matrix.*`, `e7rgb_fonts.*`, `common_module.*`; выделить `_types.h`,
-`_engine.cpp`. Локальные stateless-хелперы (`e7*`: HSV/Lerp/ГПСЧ/эффекты/сэмплер) — в
-`common_module.*`, namespace `ns_device_electronica7_rgb`.
+«дождь». Слои выделены: `device_electronica7_rgb_types.h`, `device_electronica7_rgb.cpp`
+(шаблонный блок), `device_electronica7_rgb_engine.cpp` (рендер/эффекты), а также
+`e7rgb_matrix.*`, `e7rgb_fonts.*`, `common_module.*`. Локальные stateless-хелперы
+(`e7*`: HSV/Lerp/ГПСЧ/эффекты/сэмплер) — в `common_module.*`, namespace
+`ns_device_electronica7_rgb`.
 
 ## Зависимости модулей
 
