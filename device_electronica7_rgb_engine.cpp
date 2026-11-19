@@ -54,15 +54,33 @@ void CLASS_DEVICE_E7RGB::applyMode() {
     // Применяем актуальную топологию при каждой отрисовке: изменения
     // origin/direction/layout из веб-настроек вступают в силу сразу.
     _matrix.setTopology(_config.origin, _config.direction, _config.layout);
-    if (_config.mode == E7_MODE_WORK) {
-        if (_view == E7_VIEW_RAIN)      { drawRain(false, 0.0f, NULL); return; }
-        if (_view == E7_VIEW_SETTLE)    { drawSettle(); return; }
-        if (_view == E7_VIEW_TRANS)     { drawTransition(); return; }
-        redrawFrame();
-    } else {
+    _colorPrev = _config.digitsColor;   // что фактически нарисовано сейчас
+
+    // Режим off: матрица и точки погашены, кадр не рисуется.
+    if (_config.busMode == E7_BUS_OFF) {
+        _matrix.clear();
+        _matrix.show();
+        _dotOn = false;
+        return;
+    }
+
+    if (_config.displayMode == E7_DISP_TICKER) {
+        // Бегущая строка: дождь и переходы не используются.
+        _view = E7_VIEW_NORMAL;
+        drawTicker();
+        return;
+    }
+    if (_config.displayMode == E7_DISP_MANUAL) {
         _view = E7_VIEW_NORMAL;
         renderManual();
+        return;
     }
+
+    // Часы: дождь/оседание/переход/обычный кадр.
+    if (_view == E7_VIEW_RAIN)      { drawRain(false, 0.0f, NULL); return; }
+    if (_view == E7_VIEW_SETTLE)    { drawSettle(); return; }
+    if (_view == E7_VIEW_TRANS)     { drawTransition(); return; }
+    redrawFrame();
 }
 
 void CLASS_DEVICE_E7RGB::redrawFrame() {
@@ -108,7 +126,67 @@ void CLASS_DEVICE_E7RGB::renderManual() {
         if (ch == ' ') { continue; }
         blitGlyph((uint8_t)(d * E7_GLYPH_W), _fonts.glyph(ch), mask);
     }
-    drawMaskFx(mask);
+    drawMaskFx(mask, false);
+}
+
+// Бегущая строка: каждый символ занимает E7_GLYPH_W пикселей (пробел и
+// неизвестный символ — тоже, чтобы текст не «слипался»).
+void CLASS_DEVICE_E7RGB::drawTicker() {
+    if (_matrix.ready() == false) { return; }
+    _matrix.clear();
+
+    int len = (int)_config.tickerText.length();
+    int textW = len * E7_GLYPH_W;
+    int baseX = (_config.tickerDirection == E7_TICKER_RIGHT)
+                ? (_tickerOffset - textW)
+                : (E7_WIDTH - _tickerOffset);
+
+    for (int i = 0; i < len; i++) {
+        const uint8_t* g = _fonts.glyph(_config.tickerText.charAt(i));
+        if (g == NULL) { continue; }
+        int x0 = baseX + i * E7_GLYPH_W;
+        for (int r = 0; r < E7_GLYPH_H; r++) {
+            int py = (E7_HEIGHT - 1) - r;
+            for (int c = 0; c < E7_GLYPH_W; c++) {
+                if (g[r * E7_GLYPH_W + c] == 0) { continue; }
+                int px = x0 + c;
+                if (px < 0 || px >= E7_WIDTH) { continue; }
+                uint32_t color = ns_device_electronica7_rgb::e7FxColor(_config, px, py, _animPhase, _fxOrder);
+                compositePixel(px, py, color, 1.0f);
+            }
+        }
+    }
+
+    // В режиме бегущей строки точки погашены (не часы).
+    drawDots(0.0f);
+    _matrix.show();
+}
+
+// Сдвиг строки по времени: шаг tickerSpeed мс на пиксель, полный цикл —
+// ширина текста плюс ширина матрицы.
+void CLASS_DEVICE_E7RGB::tickerScroll() {
+    int len = (int)_config.tickerText.length();
+    if (len == 0) { return; }
+    int limit = len * E7_GLYPH_W + E7_WIDTH;
+
+    // Один проход (e7.show): строка доехала до конца — остаёмся на пустом
+    // кадре до возврата часов, без «вылезания» первых символов снова.
+    if (_tickerOneShot && _tickerOffset >= limit) { return; }
+
+    uint32_t now = millis();
+    uint32_t stepMs = _config.tickerSpeed;
+    if (stepMs < E7_TICKER_SPEED_MIN) { stepMs = E7_TICKER_SPEED_MIN; }
+    uint32_t steps = (uint32_t)(now - _tickerLastMs) / stepMs;
+    if (steps == 0) { return; }
+    // Тик может быть реже tickerSpeed: сдвигаем сразу на несколько пикселей.
+    // Большой «долг» (блокировка главного цикла) не догоняем — сбрасываем.
+    if (steps > 16) { steps = 16; _tickerLastMs = now; }
+    _tickerLastMs += steps * stepMs;
+
+    _tickerOffset = (int16_t)(_tickerOffset + (int)steps);
+    if (_tickerOffset >= limit) {
+        _tickerOffset = _tickerOneShot ? (int16_t)limit : 0;
+    }
 }
 
 // Наложить глиф в логическую маску: ряд 0 глифа = верх панели (y = E7_HEIGHT-1)
@@ -151,7 +229,7 @@ void CLASS_DEVICE_E7RGB::compositePixel(int x, int y, uint32_t rgb, float level)
     _matrix.setPixel(x, y, rgb, b);
 }
 
-void CLASS_DEVICE_E7RGB::drawMaskFx(const uint8_t mask[E7_HEIGHT][E7_WIDTH]) {
+void CLASS_DEVICE_E7RGB::drawMaskFx(const uint8_t mask[E7_HEIGHT][E7_WIDTH], bool withDots) {
     if (_matrix.ready() == false) { return; }
     _matrix.clear();
     for (int y = 0; y < E7_HEIGHT; y++) {
@@ -161,7 +239,8 @@ void CLASS_DEVICE_E7RGB::drawMaskFx(const uint8_t mask[E7_HEIGHT][E7_WIDTH]) {
             compositePixel(x, y, color, 1.0f);
         }
     }
-    drawDots(dotBlinkOn() ? 1.0f : 0.0f);
+    // Ручной текст/бегущая строка — не часы: точки не мигают и погашены.
+    drawDots(withDots ? (dotBlinkOn() ? 1.0f : 0.0f) : 0.0f);
     _matrix.show();
 }
 
@@ -172,6 +251,10 @@ void CLASS_DEVICE_E7RGB::startTransition(uint8_t h, uint8_t m) {
     _curM = m;
     _transType = _config.timeFx;
     _transStartMs = millis();
+    _transBlankPrev = false;
+    _transBlankCur = false;
+    _transPrevColor = _config.digitsColor;
+    _transCurColor = _config.digitsColor;
     for (int y = 0; y < E7_HEIGHT; y++) {
         for (int x = 0; x < E7_WIDTH; x++) {
             _transRand[y][x] = (uint8_t)(ns_device_electronica7_rgb::e7Rand() % 255);
@@ -181,12 +264,70 @@ void CLASS_DEVICE_E7RGB::startTransition(uint8_t h, uint8_t m) {
     drawTransition();
 }
 
+// Уход с часов: старый кадр часов -> пустой кадр (эффект timeFx).
+// После завершения e7rgbSecondTask вызовет applyMode() и покажет текст.
+void CLASS_DEVICE_E7RGB::startExitTransition() {
+    _prevH = _curH;
+    _prevM = _curM;
+    _transType = _config.timeFx;
+    _transStartMs = millis();
+    _transBlankPrev = false;
+    _transBlankCur = true;
+    // Старый кадр — ещё прежним цветом (нет вспышки нового цвета).
+    _transPrevColor = _colorPrev;
+    _transCurColor = _config.digitsColor;
+    for (int y = 0; y < E7_HEIGHT; y++) {
+        for (int x = 0; x < E7_WIDTH; x++) {
+            _transRand[y][x] = (uint8_t)(ns_device_electronica7_rgb::e7Rand() % 255);
+        }
+    }
+    _view = E7_VIEW_TRANS;
+    drawTransition();
+}
+
+// Возврат на часы: пустой кадр -> актуальное время (эффект timeFx).
+void CLASS_DEVICE_E7RGB::startReturnTransition(uint8_t h, uint8_t m) {
+    _prevH = _curH;
+    _prevM = _curM;
+    _curH = h;
+    _curM = m;
+    _transType = _config.timeFx;
+    _transStartMs = millis();
+    _transBlankPrev = true;
+    _transBlankCur = false;
+    _transPrevColor = _config.digitsColor;
+    _transCurColor = _config.digitsColor;
+    for (int y = 0; y < E7_HEIGHT; y++) {
+        for (int x = 0; x < E7_WIDTH; x++) {
+            _transRand[y][x] = (uint8_t)(ns_device_electronica7_rgb::e7Rand() % 255);
+        }
+    }
+    _view = E7_VIEW_TRANS;
+    drawTransition();
+}
+
+// Линейная интерполяция цвета RGB (для плавной смены цвета в переходах).
+static uint32_t e7LerpColor(uint32_t a, uint32_t b, float t) {
+    if (t <= 0.0f) { return a; }
+    if (t >= 1.0f) { return b; }
+    int ar = (int)((a >> 16) & 0xFF), ag = (int)((a >> 8) & 0xFF), ab = (int)(a & 0xFF);
+    int br = (int)((b >> 16) & 0xFF), bg = (int)((b >> 8) & 0xFF), bb = (int)(b & 0xFF);
+    int r = ar + (int)((float)(br - ar) * t);
+    int g = ag + (int)((float)(bg - ag) * t);
+    int bl = ab + (int)((float)(bb - ab) * t);
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)bl;
+}
+
 void CLASS_DEVICE_E7RGB::drawTransition() {
     if (_matrix.ready() == false) { return; }
     uint8_t prevMask[E7_HEIGHT][E7_WIDTH];
     uint8_t curMask[E7_HEIGHT][E7_WIDTH];
     buildTimeMask(_prevH, _prevM, prevMask);
     buildTimeMask(_curH, _curM, curMask);
+    // Переходы «часы -> пусто» (перед текстом) и «пусто -> часы» (возврат):
+    // один из кадров — пустая матрица; эффект остаётся тем же (timeFx).
+    if (_transBlankPrev) { memset(prevMask, 0, sizeof(prevMask)); }
+    if (_transBlankCur)  { memset(curMask, 0, sizeof(curMask)); }
 
     uint32_t dur = (uint32_t)_config.timeFxDur * 1000u;
     if (dur == 0) { dur = 1000u; }
@@ -203,6 +344,8 @@ void CLASS_DEVICE_E7RGB::drawTransition() {
     if (bgFade < 0.0f) { bgFade = 0.0f; }
     if (bgFade > 1.0f) { bgFade = 1.0f; }
     float bg = bgLevel * bgFade;
+    // Для переходов «часы <-> пусто» фон не нужен: он давал лишнюю вспышку.
+    if (_transBlankPrev || _transBlankCur) { bg = 0.0f; }
 
     // Кадры перехода: цифры на полной яркости, всё остальное поле — фон
     float prevFrame[E7_HEIGHT][E7_WIDTH];
@@ -221,8 +364,12 @@ void CLASS_DEVICE_E7RGB::drawTransition() {
             bool white = false;
             switch (_transType) {
                 case E7_TFX_FADE: {
-                    if (t < 0.5f) { level = prevFrame[y][x] * (1.0f - 2.0f * t); }
-                    else          { level = curFrame[y][x]  * (2.0f * t - 1.0f); }
+                    // «часы <-> пусто»: монотонное гашение/проявление без
+                    // чёрной паузы и без обратной вспышки во второй половине.
+                    if (_transBlankCur)       { level = prevFrame[y][x] * (1.0f - t); }
+                    else if (_transBlankPrev) { level = curFrame[y][x]  * t; }
+                    else if (t < 0.5f)        { level = prevFrame[y][x] * (1.0f - 2.0f * t); }
+                    else                      { level = curFrame[y][x]  * (2.0f * t - 1.0f); }
                 } break;
                 case E7_TFX_WIPE_H:
                     level = (x < (int)(t * E7_WIDTH)) ? curFrame[y][x] : prevFrame[y][x];
@@ -298,19 +445,59 @@ void CLASS_DEVICE_E7RGB::drawTransition() {
                     break;
             }
             if (level <= 0.0f) { continue; }
-            uint32_t color = white ? 0xFFFFFF : ns_device_electronica7_rgb::e7FxColor(_config, x, y, _animPhase, _fxOrder);
+
+            // Цвет: у старого и нового кадра свои цвета, поэтому смена
+            // цвета не даёт вспышки «новым цветом» на старом кадре.
+            // FADE/FLASH — по фазе, остальные эффекты — линейный переход.
+            uint32_t color;
+            if (white) {
+                color = 0xFFFFFF;
+            } else if (_transBlankCur) {
+                // Уезд: виден только старый кадр — держим его прежний цвет
+                // для любого эффекта (нет вспышки новым цветом).
+                color = _transPrevColor;
+            } else if (_transBlankPrev) {
+                // Приезд: виден только новый кадр — его цвет.
+                color = _transCurColor;
+            } else if (_transType == E7_TFX_FADE) {
+                color = (t < 0.5f) ? _transPrevColor : _transCurColor;
+            } else if (_transType == E7_TFX_FLASH) {
+                color = (t < 0.55f) ? _transPrevColor : _transCurColor;
+            } else {
+                color = e7LerpColor(_transPrevColor, _transCurColor, t);
+            }
             compositePixel(x, y, color, level);
         }
     }
+
     // Точки в переходе: мигание приостановлено, участвуют в анимации.
+    // Для «часы <-> пусто» точки гаснут/проявляются вместе с кадром.
     float dotLevel = 1.0f;
-    bool dotWhite = false;
+    bool  dotWhite = false;
     if (_transType == E7_TFX_FADE) {
-        dotLevel = (t < 0.5f) ? (1.0f - 2.0f * t) : (2.0f * t - 1.0f);
+        if (_transBlankPrev)      { dotLevel = t; }
+        else if (_transBlankCur)  { dotLevel = 1.0f - t; }
+        else                      { dotLevel = (t < 0.5f) ? (1.0f - 2.0f * t) : (2.0f * t - 1.0f); }
     } else if (_transType == E7_TFX_FLASH && t >= 0.45f && t < 0.65f) {
         dotWhite = true;
+    } else if (_transBlankPrev) {
+        dotLevel = t;
+    } else if (_transBlankCur) {
+        dotLevel = 1.0f - t;
     }
-    drawDots(dotLevel, dotWhite);
+    uint32_t dotColor;
+    if (_transBlankCur) {
+        dotColor = _transPrevColor;
+    } else if (_transBlankPrev) {
+        dotColor = _transCurColor;
+    } else if (_transType == E7_TFX_FADE) {
+        dotColor = (t < 0.5f) ? _transPrevColor : _transCurColor;
+    } else if (_transType == E7_TFX_FLASH) {
+        dotColor = (t < 0.5f) ? _transPrevColor : _transCurColor;
+    } else {
+        dotColor = e7LerpColor(_transPrevColor, _transCurColor, t);
+    }
+    drawDots(dotLevel, dotWhite, dotColor);
     _matrix.show();
 }
 
@@ -404,6 +591,91 @@ void CLASS_DEVICE_E7RGB::drawSettle() {
 }
 
 // ============================================================
+// Перелистывание цифр (digitFlip): при смене минут разряды, которые
+// меняются, прокручиваются вверх/вниз через «ленту» из 7 строк старой
+// цифры, 1 строки зазора и 7 строк новой (8 шагов).
+// ============================================================
+
+void CLASS_DEVICE_E7RGB::startDigitFlip(uint8_t h, uint8_t m) {
+    _flipCur[0] = (uint8_t)(_curH / 10);
+    _flipCur[1] = (uint8_t)(_curH % 10);
+    _flipCur[2] = (uint8_t)(_curM / 10);
+    _flipCur[3] = (uint8_t)(_curM % 10);
+    _flipNxt[0] = (uint8_t)(h / 10);
+    _flipNxt[1] = (uint8_t)(h % 10);
+    _flipNxt[2] = (uint8_t)(m / 10);
+    _flipNxt[3] = (uint8_t)(m % 10);
+
+    _flipDir = _config.digitFlip;
+    switch (_config.digitFlipSpeed) {
+        case E7_FLIP_SPEED_SLOW:   _flipStepMs = 60; break;
+        case E7_FLIP_SPEED_FAST:   _flipStepMs = 20; break;
+        default:                   _flipStepMs = 35; break;
+    }
+    _flipStartMs = millis();
+    _flipOn = true;
+    _view = E7_VIEW_NORMAL;
+    drawFlipFrame();
+}
+
+void CLASS_DEVICE_E7RGB::drawFlipFrame() {
+    if (_matrix.ready() == false) { return; }
+
+    uint32_t stepMs = (_flipStepMs == 0) ? 35u : (uint32_t)_flipStepMs;
+    uint32_t k = (millis() - _flipStartMs) / stepMs + 1;
+    if (k > 8) {
+        // Доехали: на экране новое время.
+        _curH = (uint8_t)(_flipNxt[0] * 10 + _flipNxt[1]);
+        _curM = (uint8_t)(_flipNxt[2] * 10 + _flipNxt[3]);
+        _lastMinute = _curM;
+        _flipOn = false;
+        redrawFrame();
+        return;
+    }
+
+    uint8_t mask[E7_HEIGHT][E7_WIDTH];
+    memset(mask, 0, sizeof(mask));
+    bool up = (_flipDir == E7_FLIP_UP);
+
+    for (uint8_t d = 0; d < 4; d++) {
+        uint8_t x0 = (uint8_t)(d * E7_GLYPH_W);
+        const uint8_t* cg = _fonts.glyph((char)('0' + _flipCur[d]));
+        const uint8_t* ng = _fonts.glyph((char)('0' + _flipNxt[d]));
+
+        // Разряд не меняется — стоит на месте.
+        if (_flipCur[d] == _flipNxt[d]) {
+            blitGlyph(x0, cg, mask);
+            continue;
+        }
+        if (cg == NULL || ng == NULL) { continue; }
+
+        for (int r = 0; r < E7_GLYPH_H; r++) {
+            const uint8_t* g = NULL;
+            int srcRow = -1;
+            if (up) {
+                int idx = r + (int)k;
+                if (idx < E7_GLYPH_H)      { g = cg; srcRow = idx; }
+                else if (idx == E7_GLYPH_H) { continue; }   // зазор
+                else                       { g = ng; srcRow = idx - E7_GLYPH_H - 1; }
+            } else {
+                int p = r - (int)k;
+                if (p >= 0)             { g = cg; srcRow = p; }
+                else if (p == -1)       { continue; }       // зазор
+                else                    { g = ng; srcRow = p + E7_GLYPH_H + 1; }
+            }
+            if (g == NULL || srcRow < 0 || srcRow >= E7_GLYPH_H) { continue; }
+            int py = (E7_HEIGHT - 1) - r;   // логический y: 0 = низ
+            for (int c = 0; c < E7_GLYPH_W; c++) {
+                if (g[srcRow * E7_GLYPH_W + c] == 0) { continue; }
+                mask[py][x0 + c] = 1;
+            }
+        }
+    }
+
+    drawMaskFx(mask);
+}
+
+// ============================================================
 // Разделительные точки ЧЧ/ММ (LED 112 — нижняя, 113 — верхняя)
 // ============================================================
 
@@ -417,15 +689,18 @@ bool CLASS_DEVICE_E7RGB::dotBlinkOn() {
 }
 
 // Уровень 0..1: 0 — точки погашены. white — белый цвет (вспышка перехода).
-void CLASS_DEVICE_E7RGB::drawDots(float level, bool white) {
+void CLASS_DEVICE_E7RGB::drawDots(float level, bool white, uint32_t colorOverride) {
     if (_matrix.ready() == false) { return; }
     if (level < 0.0f) { level = 0.0f; }
     if (level > 1.0f) { level = 1.0f; }
     uint8_t b = (uint8_t)((float)_config.brightness * level);
+    bool useOverride = (colorOverride != 0xFFFFFFFF);
     uint32_t cUpper = white ? 0xFFFFFF
-                            : ns_device_electronica7_rgb::e7FxColor(_config, 8, 2, _animPhase, _fxOrder);
+                            : (useOverride ? colorOverride
+                                           : ns_device_electronica7_rgb::e7FxColor(_config, 8, 2, _animPhase, _fxOrder));
     uint32_t cLower = white ? 0xFFFFFF
-                            : ns_device_electronica7_rgb::e7FxColor(_config, 8, 4, _animPhase, _fxOrder);
+                            : (useOverride ? colorOverride
+                                           : ns_device_electronica7_rgb::e7FxColor(_config, 8, 4, _animPhase, _fxOrder));
     _matrix.setColonDot(true,  cUpper, b);
     _matrix.setColonDot(false, cLower, b);
     _dotOn = (level > 0.003f);
@@ -462,13 +737,22 @@ void CLASS_DEVICE_E7RGB::deferredApplyTask() {
             d._matrix.clear();
             d._matrix.show();
             d._dotOn = false;
+            d._toClockFx = false;
+            d._toTextFx = false;
             d._pendingApply = false;
             return;
         }
+        // Смена текста/скорости/направления — строку с начала.
+        if (d._tickerReset) {
+            d._tickerOffset = 0;
+            d._tickerLastMs = millis();
+            d._tickerReset = false;
+        }
         // Скорректировать состояние отображения под изменённые настройки
         bool synced = core_sys.timeValid();
-        if (d._config.mode != E7_MODE_WORK) {
+        if (d._config.displayMode != E7_DISP_CLOCK) {
             d._view = E7_VIEW_NORMAL;
+            d._flipOn = false;
         } else if (d._config.rainEnabled == 0 &&
                    (d._view == E7_VIEW_RAIN || d._view == E7_VIEW_SETTLE)) {
             d._view = E7_VIEW_NORMAL;
@@ -477,7 +761,26 @@ void CLASS_DEVICE_E7RGB::deferredApplyTask() {
         } else if (d._config.rainEnabled == 1 && d._view == E7_VIEW_NORMAL && synced == false) {
             d.startRain();
         }
-        d.applyMode();
+
+        bool toClockFx = d._toClockFx;
+        bool toTextFx = d._toTextFx;
+        d._toClockFx = false;
+        d._toTextFx = false;
+        bool fxOk = synced && d._config.timeFx != E7_TFX_OFF && d._config.timeFxDur > 0 &&
+                    d._view == E7_VIEW_NORMAL;
+
+        if (toClockFx && fxOk && d._config.displayMode == E7_DISP_CLOCK) {
+            // Приезд часов: пустой кадр -> актуальное время.
+            time_t t = core_sys.timeNow();
+            d._forceRedraw = false;
+            d.startReturnTransition((uint8_t)hour(t), (uint8_t)minute(t));
+        } else if (toTextFx && fxOk && d._config.displayMode != E7_DISP_CLOCK) {
+            // Уезд часов: старый кадр -> пусто, затем applyMode() покажет текст.
+            d._forceRedraw = false;
+            d.startExitTransition();
+        } else {
+            d.applyMode();
+        }
         d._pendingApply = false;
     }
 }
@@ -493,6 +796,13 @@ void e7rgbAnimTask() {
 
     // Режим off: матрица погашена, рендер не выполняется.
     if (d._config.busMode == E7_BUS_OFF) {
+        SetTimerTask(e7rgbAnimTask, E7_FX_RENDER_MS);
+        return;
+    }
+
+    // Есть неприменённые настройки (цвет/режим): не перерисовываем старый
+    // кадр новым цветом — дождёмся deferredApplyTask, чтобы не было вспышки.
+    if (d._pendingApply) {
         SetTimerTask(e7rgbAnimTask, E7_FX_RENDER_MS);
         return;
     }
@@ -517,12 +827,40 @@ void e7rgbAnimTask() {
         d._animPhase = next;
     }
 
-    if (d._view == E7_VIEW_RAIN) {
+    // Переходы (в т.ч. «уезд» часов при displayMode=ticker/manual) имеют
+    // приоритет над обычным рендером режима.
+    if (d._view == E7_VIEW_TRANS) {
+        d.drawTransition();
+        // Завершение — по 50-мс тику (а не раз в секунду), чтобы переход
+        // заканчивался ровно в timeFxDur и текст стартовал вовремя.
+        uint32_t dur = (uint32_t)d._config.timeFxDur * 1000u;
+        if (dur == 0 || (millis() - d._transStartMs) >= dur) {
+            d._view = E7_VIEW_NORMAL;
+            d._lastMinute = d._curM;
+            if (d._config.displayMode == E7_DISP_TICKER) {
+                d._tickerOffset = 0;
+                d._tickerLastMs = millis();
+            }
+            d.applyMode();
+        }
+    } else if (d._view == E7_VIEW_RAIN) {
         d.drawRain(false, 0.0f, NULL);
     } else if (d._view == E7_VIEW_SETTLE) {
         d.drawSettle();
-    } else if (d._view == E7_VIEW_TRANS) {
-        d.drawTransition();
+    } else if (d._config.displayMode == E7_DISP_TICKER) {
+        // Бегущая строка: прокрутка по tickerSpeed, перерисовка каждый тик
+        // (точки и анимированный цвет обновляются здесь же).
+        d.tickerScroll();
+        d.drawTicker();
+    } else if (d._config.displayMode == E7_DISP_MANUAL) {
+        // Точки в ручном режиме погашены: кадр обновляем только при
+        // анимированном эффекте (иначе он статичен).
+        if (phaseAdvanced && ns_device_electronica7_rgb::e7FxAnimated(d._config.effect)) {
+            d.applyMode();
+        }
+    } else if (d._flipOn) {
+        // Перелистывание цифр: шаг 20..60 мс, перерисовка каждый тик.
+        d.drawFlipFrame();
     } else if (phaseAdvanced && ns_device_electronica7_rgb::e7FxAnimated(d._config.effect)) {
         // обычный кадр перерисовываем только при смене фазы цвета
         d.applyMode();
@@ -536,7 +874,8 @@ void e7rgbAnimTask() {
         }
     }
 
-    SetTimerTask(e7rgbAnimTask, E7_FX_RENDER_MS);
+    // Пока идёт перелистывание, тик ускоряется, чтобы шаг 20 мс не «проскакивал».
+    SetTimerTask(e7rgbAnimTask, d._flipOn ? 20 : E7_FX_RENDER_MS);
 }
 
 // ============================================================
@@ -553,12 +892,20 @@ void e7rgbSecondTask() {
         return;
     }
 
-    if (d._config.mode != E7_MODE_WORK) {
+    bool synced = core_sys.timeValid();
+
+    // Есть неприменённые изменения или идёт переход: не вмешиваемся, иначе
+    // мгновенная перерисовка часов даст вспышку перед плавным «приездом».
+    if (d._pendingApply || d._view == E7_VIEW_TRANS) {
         SetTimerTask(e7rgbSecondTask, 1000);
         return;
     }
 
-    bool synced = core_sys.timeValid();
+    // Часы/дождь актуальны только для режима отображения clock.
+    if (d._config.displayMode != E7_DISP_CLOCK) {
+        SetTimerTask(e7rgbSecondTask, 1000);
+        return;
+    }
 
     if (d._view == E7_VIEW_RAIN) {
         if (synced) {
@@ -596,13 +943,9 @@ void e7rgbSecondTask() {
         return;
     }
 
-    if (d._view == E7_VIEW_TRANS) {
-        uint32_t dur = (uint32_t)d._config.timeFxDur * 1000u;
-        if (dur == 0 || (millis() - d._transStartMs) >= dur) {
-            d._view = E7_VIEW_NORMAL;
-            d._lastMinute = d._curM;
-            d.applyMode();
-        }
+    // Пока идёт перелистывание, новая смена минут ждёт его завершения
+    // (drawFlipFrame() сам обновит _lastMinute и перерисует кадр).
+    if (d._flipOn) {
         SetTimerTask(e7rgbSecondTask, 1000);
         return;
     }
@@ -631,7 +974,22 @@ void e7rgbSecondTask() {
     if (d._forceRedraw || m != d._lastMinute) {
         bool immediate = d._forceRedraw;   // первое время/смена настроек — без перехода
         d._forceRedraw = false;
-        if (!immediate && synced && d._config.timeFx != E7_TFX_OFF && d._config.timeFxFreq > 0 &&
+
+        // Перелистывание цифр имеет приоритет над timeFx при смене минут.
+        bool flipChanged = false;
+        if (!immediate && synced && d._config.digitFlip != E7_FLIP_NONE && d._view == E7_VIEW_NORMAL) {
+            uint8_t cur[4] = { (uint8_t)(d._curH / 10), (uint8_t)(d._curH % 10),
+                               (uint8_t)(d._curM / 10), (uint8_t)(d._curM % 10) };
+            uint8_t nxt[4] = { (uint8_t)(h / 10), (uint8_t)(h % 10),
+                               (uint8_t)(m / 10), (uint8_t)(m % 10) };
+            for (int i = 0; i < 4; i++) {
+                if (cur[i] != nxt[i]) { flipChanged = true; break; }
+            }
+        }
+
+        if (flipChanged) {
+            d.startDigitFlip(h, m);
+        } else if (!immediate && synced && d._config.timeFx != E7_TFX_OFF && d._config.timeFxFreq > 0 &&
             (m % d._config.timeFxFreq) == 0) {
             d.startTransition(h, m);
         } else {

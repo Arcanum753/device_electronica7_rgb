@@ -16,8 +16,28 @@
 #define E7_FONT_DIR_SLASH   "/e7fonts/"
 #define E7_FONT_DEFAULT     "/e7fonts/digital7.fnt"
 
-#define E7_MODE_WORK        0   // рабочий режим: часы ЧЧ:ММ (NTP)
-#define E7_MODE_MANUAL      1   // ручной режим: свой символ в каждой из 4 цифр
+// Режим отображения (что показывается на матрице)
+#define E7_DISP_CLOCK       0   // часы ЧЧ:ММ (NTP)
+#define E7_DISP_MANUAL      1   // ручной текст (4 символа)
+#define E7_DISP_TICKER      2   // бегущая строка
+
+// Направление перелистывания цифр
+#define E7_FLIP_NONE        0   // без перелистывания
+#define E7_FLIP_UP          1   // перелистывание вверх
+#define E7_FLIP_DOWN        2   // перелистывание вниз
+
+// Скорость перелистывания цифр (мс на шаг)
+#define E7_FLIP_SPEED_SLOW    0   // 60 мс
+#define E7_FLIP_SPEED_NORMAL  1   // 35 мс
+#define E7_FLIP_SPEED_FAST    2   // 20 мс
+
+// Направление бегущей строки
+#define E7_TICKER_LEFT      0   // текст едет влево
+#define E7_TICKER_RIGHT     1   // текст едет вправо
+
+#define E7_TICKER_MAX_LEN   64  // максимум символов бегущей строки
+#define E7_TICKER_SPEED_MIN 10  // мс на пиксель
+#define E7_TICKER_SPEED_MAX 200
 
 // Режим управления шиной (off / auto / macro)
 #define E7_BUS_OFF          0   // выключено: матрица погашена
@@ -78,7 +98,7 @@
 
 typedef struct {
     uint8_t  busMode;       // E7_BUS_OFF / E7_BUS_AUTO / E7_BUS_MACRO
-    uint8_t  mode;          // E7_MODE_WORK / E7_MODE_MANUAL
+    uint8_t  displayMode;   // E7_DISP_CLOCK / E7_DISP_MANUAL / E7_DISP_TICKER
     int16_t  dataPin;       // пин данных (по умолчанию 16, -1 = выкл.)
     uint8_t  brightness;    // 0..255 (по умолчанию 25; масштабирование каналов)
     uint8_t  colonBlink;    // 0..10 с — период моргания точек ЧЧ/ММ (0 = всегда)
@@ -101,8 +121,13 @@ typedef struct {
     uint8_t  rainDurMin;    // 1..10 с — минимальная длительность дождя
     uint8_t  rainIntensity; // 1..10 — интенсивность дождя
     uint8_t  rainSettleDur; // 0..10 с — длительность оседания дождя в цифры
+    uint8_t  digitFlip;     // E7_FLIP_* — перелистывание цифр при смене минут
+    uint8_t  digitFlipSpeed;// E7_FLIP_SPEED_* — скорость перелистывания
+    String   tickerText;    // текст бегущей строки (до E7_TICKER_MAX_LEN символов)
+    uint8_t  tickerSpeed;   // мс на пиксель (10..200)
+    uint8_t  tickerDirection; // E7_TICKER_LEFT / E7_TICKER_RIGHT
     String   fontFile;      // путь шрифта в ФС
-    String   manualText;    // 4 символа для ручного режима ('0'..'9','-',' ')
+    String   manualText;    // 4 символа для ручного режима
 } strE7RgbConfig;
 
 #endif // _DEVICE_ELECTRONICA7_RGB_TYPES_h

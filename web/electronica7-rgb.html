@@ -59,11 +59,41 @@
                             <option value="2">macro (сценарии)</option>
                         </select>
                     </td></tr>
-                <tr><td class="label">Режим / Mode:</td>
+                <tr><td class="label">Режим отображения:</td>
                     <td>
-                        <select id="mode" onchange="updateModeUI()">
-                            <option value="0">Рабочий (часы ЧЧ:ММ)</option>
-                            <option value="1">Ручной ввод цифр</option>
+                        <select id="displayMode" onchange="updateDisplayUI()">
+                            <option value="0">Часы ЧЧ:ММ</option>
+                            <option value="1">Ручной текст (4 символа)</option>
+                            <option value="2">Бегущая строка (ticker)</option>
+                        </select>
+                    </td></tr>
+                <tr id="tickerTextRow"><td class="label">Текст строки:</td>
+                    <td><input type="text" id="tickerText" maxlength="64" value=""
+                               style="width:220px;" placeholder="Текст бегущей строки"></td></tr>
+                <tr id="tickerSpeedRow"><td class="label">Скорость строки, мс/px:</td>
+                    <td><input type="number" id="tickerSpeed" min="10" max="200" step="1"
+                               value="160" style="width:80px;"></td></tr>
+                <tr id="tickerDirRow"><td class="label">Направление строки:</td>
+                    <td>
+                        <select id="tickerDirection">
+                            <option value="0">Влево</option>
+                            <option value="1">Вправо</option>
+                        </select>
+                    </td></tr>
+                <tr id="flipRow"><td class="label">Перелистывание цифр:</td>
+                    <td>
+                        <select id="digitFlip">
+                            <option value="0">Нет</option>
+                            <option value="1">Вверх</option>
+                            <option value="2">Вниз</option>
+                        </select>
+                    </td></tr>
+                <tr id="flipSpeedRow"><td class="label">Скорость перелистывания:</td>
+                    <td>
+                        <select id="digitFlipSpeed">
+                            <option value="0">Медленно</option>
+                            <option value="1">Обычно</option>
+                            <option value="2">Быстро</option>
                         </select>
                     </td></tr>
                 <tr><td class="label">Эффект:</td>
@@ -308,9 +338,16 @@
             fillDirectionOptions(parseInt(document.getElementById('origin').value));
         }
 
-        function updateModeUI() {
-            const manual = (parseInt(document.getElementById('mode').value) === 1);
-            document.getElementById('manualBlock').classList.toggle('hidden', !manual);
+        function updateDisplayUI() {
+            const d = parseInt(document.getElementById('displayMode').value);
+            const ticker = (d === 2);
+            const clock = (d === 0);
+            document.getElementById('manualBlock').classList.toggle('hidden', d !== 1);
+            document.getElementById('tickerTextRow').style.display = ticker ? '' : 'none';
+            document.getElementById('tickerSpeedRow').style.display = ticker ? '' : 'none';
+            document.getElementById('tickerDirRow').style.display = ticker ? '' : 'none';
+            document.getElementById('flipRow').style.display = clock ? '' : 'none';
+            document.getElementById('flipSpeedRow').style.display = clock ? '' : 'none';
         }
 
         function updateBusModeWarning() {
@@ -415,7 +452,12 @@
             let mt = '';
             for (let i = 0; i < 4; i++) mt += document.getElementById('m' + i).value;
             let p = 'busMode=' + get('busMode')
-                  + '&mode=' + get('mode')
+                  + '&displayMode=' + get('displayMode')
+                  + '&tickerText=' + encodeURIComponent(get('tickerText'))
+                  + '&tickerSpeed=' + get('tickerSpeed')
+                  + '&tickerDirection=' + get('tickerDirection')
+                  + '&digitFlip=' + get('digitFlip')
+                  + '&digitFlipSpeed=' + get('digitFlipSpeed')
                   + '&effect=' + get('effect')
                   + '&effectDir=' + get('effectDir')
                   + '&digitsColor=' + encodeURIComponent(get('digitsColor'))
@@ -513,7 +555,7 @@
                 fillDirectionOptions(parseInt(document.getElementById('origin').value));
                 updatePaletteVisibility();
                 updateFxUI();
-                updateModeUI();
+                updateDisplayUI();
                 updateEffectsUI();
                 updateBusModeWarning();
             } catch(e) {}
@@ -524,7 +566,7 @@
             fillDirectionOptions(2);
             fillPaletteBox();
             updateFxUI();
-            updateModeUI();
+            updateDisplayUI();
             updateEffectsUI();
             // Последовательные запросы, без дублей: updateFromInfo() сам запрашивает
             // /e7rgb/info и (один раз) /e7rgb/fonts; далее — только версии.

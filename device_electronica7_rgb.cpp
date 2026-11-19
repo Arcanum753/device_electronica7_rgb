@@ -37,6 +37,14 @@ CLASS_DEVICE_E7RGB::CLASS_DEVICE_E7RGB() {
     _prevH = 0; _prevM = 0;
     _transType = E7_TFX_OFF;
     _transStartMs = 0;
+    _transBlankPrev = false;
+    _transBlankCur = false;
+    _transPrevColor = 0xFFFFFF;
+    _transCurColor = 0xFFFFFF;
+    _colorPrev = 0xFFFFFF;
+    _toClockFx = false;
+    _toTextFx = false;
+    _tickerOneShot = false;
     _settleStartMs = 0;
     _rainStartMs = 0;
     _rainRampStartMs = 0;
@@ -48,11 +56,34 @@ CLASS_DEVICE_E7RGB::CLASS_DEVICE_E7RGB() {
         _rainColOn[i] = false;
     }
     memset(_transRand, 0, sizeof(_transRand));
+
+    _tickerOffset = 0;
+    _tickerLastMs = 0;
+    _tickerReset = false;
+
+    _flipOn = false;
+    _flipStartMs = 0;
+    _flipDir = E7_FLIP_UP;
+    _flipStepMs = 35;
+    for (int i = 0; i < 4; i++) { _flipCur[i] = 0; _flipNxt[i] = 0; }
 }
 
 // Forward-объявления свободных функций, используемых в шаблонном блоке
 void e7rgbSecondTask();
 void e7rgbAnimTask();
+
+// Текст бегущей строки: без '|' и переводов строк, не длиннее E7_TICKER_MAX_LEN.
+static String e7SanitizeTickerText(const String& in) {
+    String out;
+    int len = in.length();
+    for (int i = 0; i < len && out.length() < E7_TICKER_MAX_LEN; i++) {
+        char c = in.charAt(i);
+        if (c == '|' || c == '\r' || c == '\n') { continue; }
+        if ((unsigned char)c < 0x20) { continue; }
+        out += c;
+    }
+    return out;
+}
 
 // ============================================================
 // setFs()
@@ -81,22 +112,52 @@ void CLASS_DEVICE_E7RGB::begin() {
     _curH = 0; _curM = 0;
     _prevH = 0; _prevM = 0;
     _transType = E7_TFX_OFF;
+    _transBlankPrev = false;
+    _transBlankCur = false;
+    _transPrevColor = 0xFFFFFF;
+    _transCurColor = 0xFFFFFF;
+    _colorPrev = 0xFFFFFF;
+    _toClockFx = false;
+    _toTextFx = false;
+    _tickerOneShot = false;
     _settleStartMs = 0;
     _fxAccumMs = 0;
     _dotOn = false;
     memset(_transRand, 0, sizeof(_transRand));
 
+    _tickerOffset = 0;
+    _tickerLastMs = millis();
+    _tickerReset = false;
+
+    _flipOn = false;
+    _flipStartMs = 0;
+    _flipDir = E7_FLIP_UP;
+    _flipStepMs = 35;
+    for (int i = 0; i < 4; i++) { _flipCur[i] = 0; _flipNxt[i] = 0; }
+
     defaultConfig();
     if (loadConfig() == false) { saveConfig(); }
+    _colorPrev = _config.digitsColor;
 
     // Публикуем фактические значения конфига после его загрузки.
     core_state.signal("e7.mode", BusValue::en(_config.busMode));
+    core_state.signal("e7.display", BusValue::en(_config.displayMode));
     core_state.signal("e7.effect", BusValue::en(_config.effect));
     core_state.signal("e7.brightness", BusValue::i32(_config.brightness));
     core_state.signal("e7.colon_blink", BusValue::i32(_config.colonBlink));
     core_state.signal("e7.speed", BusValue::i32(_config.animSpeed));
     core_state.signal("e7.color", BusValue::str(ns_core_json::colorToHex(_config.digitsColor)));
     core_state.signal("e7.text", BusValue::str(_config.manualText));
+    core_state.signal("e7.ticker", BusValue::str(_config.tickerText));
+    core_state.signal("e7.show", BusValue::str(
+        (_config.displayMode == E7_DISP_MANUAL) ? _config.manualText :
+        (_config.displayMode == E7_DISP_TICKER) ? _config.tickerText : String("")));
+    core_state.signal("e7.ticker_speed", BusValue::i32(_config.tickerSpeed));
+    core_state.signal("e7.ticker_dir", BusValue::en(_config.tickerDirection));
+    core_state.signal("e7.flip", BusValue::en(_config.digitFlip));
+    core_state.signal("e7.flip_speed", BusValue::i32(_config.digitFlipSpeed));
+
+    terminalRegister();
 
     if (_fs != NULL) { loadFont(); }
 
@@ -107,7 +168,7 @@ void CLASS_DEVICE_E7RGB::begin() {
         // Режим off: матрица и точки остаются погашенными с момента старта.
         _matrix.clear();
         _matrix.show();
-    } else if (_config.mode == E7_MODE_WORK && _config.rainEnabled == 1 && !core_sys.timeValid()) {
+    } else if (_config.displayMode == E7_DISP_CLOCK && _config.rainEnabled == 1 && !core_sys.timeValid()) {
         startRain();
     } else {
         applyMode();
@@ -129,6 +190,9 @@ static const char* const e7BusModeNames[3] = { "off", "auto", "macro" };
 static const char* const e7EffectNames[5] = {
     "mono", "rainbow", "grad_static", "grad_dynamic", "colorcycle",
 };
+static const char* const e7DisplayNames[3] = { "clock", "manual", "ticker" };
+static const char* const e7TickerDirNames[2] = { "left", "right" };
+static const char* const e7FlipNames[3] = { "none", "up", "down" };
 
 static int e7ArgInt(const BusValue* a) {
     if (a == nullptr) { return 0; }
@@ -177,6 +241,43 @@ static int e7BusText(void*, int argc, const BusValue* a, BusValue&) {
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setManualText(a[0].s) ? BUS_OK : BUS_ERR_BAD_VALUE;
 }
+static int e7BusDisplay(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setDisplayMode((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusTicker(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    if (a[0].kind != BusValue::STR) { return BUS_ERR_BAD_VALUE; }
+    return device_electronica7_rgb.setTickerText(a[0].s) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusShow(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    if (a[0].kind != BusValue::STR) { return BUS_ERR_BAD_VALUE; }
+    return device_electronica7_rgb.setShowText(a[0].s) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusTickerSpeed(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setTickerSpeed((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusTickerDir(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setTickerDirection((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusFlip(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setDigitFlip((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
+static int e7BusFlipSpeed(void*, int argc, const BusValue* a, BusValue&) {
+    if (e7BusAllowed() == false) { return BUS_ERR_DENIED; }
+    if (argc < 1) { return BUS_ERR_BAD_ARGC; }
+    return device_electronica7_rgb.setDigitFlipSpeed((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
+}
 static int e7BusMode(void*, int argc, const BusValue* a, BusValue&) {
     if (argc < 1) { return BUS_ERR_BAD_ARGC; }
     return device_electronica7_rgb.setBusMode((uint8_t)e7ArgInt(&a[0])) ? BUS_OK : BUS_ERR_BAD_VALUE;
@@ -192,30 +293,46 @@ static int e7BusSaveMode(void*, int argc, const BusValue* a, BusValue&) {
     return device_electronica7_rgb.saveModeConfig() ? BUS_OK : BUS_ERR_INTERNAL;
 }
 
-// Ресурсы шины (namespace e7): состояния mode (ENUM off/auto/macro), effect (ENUM
-// mono/rainbow/grad_static/grad_dynamic/colorcycle), brightness, speed, color, text;
-// функции mode, effect, brightness, speed, color, text, save, save_mode. Каталог
-// /macros/resources.json собирается при сборке ФС (python/gen_resources_catalog.py).
+// Ресурсы шины (namespace e7): состояния mode (ENUM off/auto/macro), display (ENUM
+// clock/manual/ticker), effect (ENUM mono/rainbow/grad_static/grad_dynamic/colorcycle),
+// brightness, speed, color, text, ticker, ticker_speed, ticker_dir (ENUM left/right),
+// flip (ENUM none/up/down), flip_speed; функции с теми же именами плюс save/save_mode.
+// Каталог /macros/resources.json собирается при сборке ФС
+// (python/gen_resources_catalog.py).
 void CLASS_DEVICE_E7RGB::register_resources() {
     DEBUGE7RGB("%s\r\n", __FUNCTION__);
 
     core_state.regEnum("mode", 3, e7BusModeNames, "device control mode (off/auto/macro)");
+    core_state.regEnum("display", 3, e7DisplayNames, "display mode (clock/manual/ticker)");
     core_state.regEnum("effect", 5, e7EffectNames, "color effect");
     core_state.regState("brightness", BusValue::I32, "brightness 0..255", true);
     core_state.regState("colon_blink", BusValue::I32, "colon blink period, s (0=always on)", true);
     core_state.regState("speed", BusValue::I32, "animation speed 1..50", true);
     core_state.regState("color", BusValue::STR, "digits color #RRGGBB", true);
     core_state.regState("text", BusValue::STR, "manual text (4 chars)", true);
+    core_state.regState("show", BusValue::STR, "show text (<=4 static, longer -> ticker)", true);
+    core_state.regState("ticker", BusValue::STR, "ticker text (up to 64 chars)", true);
+    core_state.regState("ticker_speed", BusValue::I32, "ticker speed, ms per pixel (10..200)", true);
+    core_state.regEnum("ticker_dir", 2, e7TickerDirNames, "ticker direction (left/right)");
+    core_state.regEnum("flip", 3, e7FlipNames, "digit flip on minute change (none/up/down)");
+    core_state.regState("flip_speed", BusValue::I32, "digit flip speed (0=slow,1=normal,2=fast)", true);
 
     core_state.regFunc("mode", "i->", "set control mode", e7BusMode, nullptr);
     // Все bus-функции записи, кроме mode и save_mode, работают только в режиме MACRO.
     // mode — канал управления режимом, save_mode — сохранение режима (всегда доступны).
+    core_state.regFunc("display", "i->", "set display mode", e7BusDisplay, nullptr);
     core_state.regFunc("effect", "i->", "set effect", e7BusEffect, nullptr);
     core_state.regFunc("brightness", "i->", "set brightness", e7BusBrightness, nullptr);
     core_state.regFunc("colon_blink", "i->", "set colon blink period", e7BusColonBlink, nullptr);
     core_state.regFunc("speed", "i->", "set animation speed", e7BusSpeed, nullptr);
     core_state.regFunc("color", "s->", "set digits color", e7BusColor, nullptr);
     core_state.regFunc("text", "s->", "set manual text", e7BusText, nullptr);
+    core_state.regFunc("show", "s->", "show text (auto ticker if long)", e7BusShow, nullptr);
+    core_state.regFunc("ticker", "s->", "set ticker text", e7BusTicker, nullptr);
+    core_state.regFunc("ticker_speed", "i->", "set ticker speed", e7BusTickerSpeed, nullptr);
+    core_state.regFunc("ticker_dir", "i->", "set ticker direction", e7BusTickerDir, nullptr);
+    core_state.regFunc("flip", "i->", "set digit flip", e7BusFlip, nullptr);
+    core_state.regFunc("flip_speed", "i->", "set digit flip speed", e7BusFlipSpeed, nullptr);
     core_state.regFunc("save", "->", "persist current settings to config", e7BusSave, nullptr);
     core_state.regFunc("save_mode", "->", "persist only module mode to config", e7BusSaveMode, nullptr);
     // Значения публикуются в begin() после loadConfig().
@@ -261,6 +378,7 @@ bool CLASS_DEVICE_E7RGB::setSpeed(uint8_t s) {
 }
 
 bool CLASS_DEVICE_E7RGB::setDigitsColor(uint32_t c) {
+    _colorPrev = _config.digitsColor;   // цвет, который сейчас на экране
     _config.digitsColor = c & 0xFFFFFF;
     _forceRedraw = true;
     _pendingApply = true;
@@ -271,12 +389,124 @@ bool CLASS_DEVICE_E7RGB::setDigitsColor(uint32_t c) {
 
 bool CLASS_DEVICE_E7RGB::setManualText(const String& t) {
     String s = t.substring(0, 4);
+    uint8_t prev = _config.displayMode;
     _config.manualText = s;
-    _config.mode = E7_MODE_MANUAL;
+    _config.displayMode = E7_DISP_MANUAL;
+    if (prev == E7_DISP_CLOCK) { _toTextFx = true; }
+    _flipOn = false;
     _forceRedraw = true;
     _pendingApply = true;
     SetTask(deferredApplyTask);
     core_state.signal("e7.text", BusValue::str(s));
+    core_state.signal("e7.display", BusValue::en(_config.displayMode));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setDisplayMode(uint8_t d) {
+    if (d > E7_DISP_TICKER) { return false; }
+    uint8_t prev = _config.displayMode;
+    _config.displayMode = d;
+    if (prev == E7_DISP_CLOCK && d != E7_DISP_CLOCK) { _toTextFx = true; }
+    if (prev != E7_DISP_CLOCK && d == E7_DISP_CLOCK) { _toClockFx = true; }
+    if (d != E7_DISP_CLOCK) { _flipOn = false; }
+    if (d == E7_DISP_TICKER) { _tickerOneShot = false; _tickerReset = true; }
+    _forceRedraw = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.display", BusValue::en(d));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setTickerText(const String& t) {
+    _config.tickerText = e7SanitizeTickerText(t);
+    _tickerOneShot = false;   // явный ticker — цикличная прокрутка
+    _tickerReset = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.ticker", BusValue::str(_config.tickerText));
+    return true;
+}
+
+// «Покажи текст»: короткий (<= 4 символов) — статично в manual, длинный —
+// автоматически бегущей строкой.
+bool CLASS_DEVICE_E7RGB::setShowText(const String& t) {
+    String s = e7SanitizeTickerText(t);
+    uint8_t prev = _config.displayMode;
+    _flipOn = false;
+
+    if (s.length() == 0) {
+        _config.displayMode = E7_DISP_CLOCK;
+        if (prev != E7_DISP_CLOCK) { _toClockFx = true; }
+        _forceRedraw = true;
+        _pendingApply = true;
+        SetTask(deferredApplyTask);
+        core_state.signal("e7.show", BusValue::str(""));
+        core_state.signal("e7.display", BusValue::en(_config.displayMode));
+        return true;
+    }
+
+    if (s.length() <= E7_GLYPH_W) {
+        while (s.length() < E7_GLYPH_W) { s += ' '; }
+        _config.manualText = s;
+        _config.displayMode = E7_DISP_MANUAL;
+        _tickerOneShot = false;
+    } else {
+        _config.tickerText = s;
+        _config.displayMode = E7_DISP_TICKER;
+        _tickerOneShot = true;   // один проход, затем пусто до возврата часов
+        _tickerReset = true;
+    }
+    if (prev == E7_DISP_CLOCK) { _toTextFx = true; }
+
+    _forceRedraw = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.show", BusValue::str(s));
+    core_state.signal("e7.display", BusValue::en(_config.displayMode));
+    if (_config.displayMode == E7_DISP_MANUAL) {
+        core_state.signal("e7.text", BusValue::str(s));
+    } else {
+        core_state.signal("e7.ticker", BusValue::str(s));
+    }
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setTickerSpeed(uint8_t ms) {
+    if (ms < E7_TICKER_SPEED_MIN || ms > E7_TICKER_SPEED_MAX) { return false; }
+    _config.tickerSpeed = ms;
+    _tickerReset = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.ticker_speed", BusValue::i32(ms));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setTickerDirection(uint8_t dir) {
+    if (dir > E7_TICKER_RIGHT) { return false; }
+    _config.tickerDirection = dir;
+    _tickerReset = true;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.ticker_dir", BusValue::en(dir));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setDigitFlip(uint8_t f) {
+    if (f > E7_FLIP_DOWN) { return false; }
+    _config.digitFlip = f;
+    if (f == E7_FLIP_NONE) { _flipOn = false; }
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.flip", BusValue::en(f));
+    return true;
+}
+
+bool CLASS_DEVICE_E7RGB::setDigitFlipSpeed(uint8_t s) {
+    if (s > E7_FLIP_SPEED_FAST) { return false; }
+    _config.digitFlipSpeed = s;
+    _pendingApply = true;
+    SetTask(deferredApplyTask);
+    core_state.signal("e7.flip_speed", BusValue::i32(s));
     return true;
 }
 
@@ -339,7 +569,12 @@ void CLASS_DEVICE_E7RGB::handleInfo(AsyncWebServerRequest *request) {
     String values = "";
 
     values += "busMode|"       + String(_config.busMode)       + "|input\n";
-    values += "mode|"          + String(_config.mode)          + "|input\n";
+    values += "displayMode|"   + String(_config.displayMode)   + "|input\n";
+    values += "tickerText|"    + _config.tickerText            + "|input\n";
+    values += "tickerSpeed|"   + String(_config.tickerSpeed)   + "|input\n";
+    values += "tickerDirection|" + String(_config.tickerDirection) + "|input\n";
+    values += "digitFlip|"     + String(_config.digitFlip)     + "|input\n";
+    values += "digitFlipSpeed|" + String(_config.digitFlipSpeed) + "|input\n";
     values += "dataPin|"       + String(_config.dataPin)       + "|input\n";
     values += "brightness|"    + String(_config.brightness)    + "|input\n";
     values += "colonBlink|"    + String(_config.colonBlink)    + "|input\n";
@@ -380,6 +615,7 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
 
     if (request->args() == 0) { request->send(400, "text/plain", "No args"); return; }
 
+    uint8_t prevDisp = _config.displayMode;
     for (uint8_t i = 0; i < request->args(); i++) {
         String name = request->argName(i);
         String val  = request->arg(i);
@@ -391,8 +627,40 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
             core_state.signal("e7.mode", BusValue::en(_config.busMode));
             continue;
         }
-        if (name == "mode") {
-            _config.mode = (uint8_t)constrain(val.toInt(), E7_MODE_WORK, E7_MODE_MANUAL);
+        if (name == "displayMode") {
+            _config.displayMode = (uint8_t)constrain(val.toInt(), E7_DISP_CLOCK, E7_DISP_TICKER);
+            if (_config.displayMode != E7_DISP_CLOCK) { _flipOn = false; }
+            _tickerReset = true;
+            core_state.signal("e7.display", BusValue::en(_config.displayMode));
+            continue;
+        }
+        if (name == "tickerText") {
+            _config.tickerText = e7SanitizeTickerText(val);
+            _tickerReset = true;
+            core_state.signal("e7.ticker", BusValue::str(_config.tickerText));
+            continue;
+        }
+        if (name == "tickerSpeed") {
+            _config.tickerSpeed = (uint8_t)constrain(val.toInt(), E7_TICKER_SPEED_MIN, E7_TICKER_SPEED_MAX);
+            _tickerReset = true;
+            core_state.signal("e7.ticker_speed", BusValue::i32(_config.tickerSpeed));
+            continue;
+        }
+        if (name == "tickerDirection") {
+            _config.tickerDirection = (uint8_t)constrain(val.toInt(), E7_TICKER_LEFT, E7_TICKER_RIGHT);
+            _tickerReset = true;
+            core_state.signal("e7.ticker_dir", BusValue::en(_config.tickerDirection));
+            continue;
+        }
+        if (name == "digitFlip") {
+            _config.digitFlip = (uint8_t)constrain(val.toInt(), E7_FLIP_NONE, E7_FLIP_DOWN);
+            if (_config.digitFlip == E7_FLIP_NONE) { _flipOn = false; }
+            core_state.signal("e7.flip", BusValue::en(_config.digitFlip));
+            continue;
+        }
+        if (name == "digitFlipSpeed") {
+            _config.digitFlipSpeed = (uint8_t)constrain(val.toInt(), E7_FLIP_SPEED_SLOW, E7_FLIP_SPEED_FAST);
+            core_state.signal("e7.flip_speed", BusValue::i32(_config.digitFlipSpeed));
             continue;
         }
         if (name == "dataPin") {
@@ -435,6 +703,7 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
             continue;
         }
         if (name == "digitsColor") {
+            _colorPrev = _config.digitsColor;
             _config.digitsColor = ns_core_json::colorParseOrWhite(val);
             core_state.signal("e7.color", BusValue::str(ns_core_json::colorToHex(_config.digitsColor)));
             continue;
@@ -510,6 +779,9 @@ void CLASS_DEVICE_E7RGB::handleSave(AsyncWebServerRequest *request) {
         }
     }
 
+    if (prevDisp == E7_DISP_CLOCK && _config.displayMode != E7_DISP_CLOCK) { _toTextFx = true; }
+    if (prevDisp != E7_DISP_CLOCK && _config.displayMode == E7_DISP_CLOCK) { _toClockFx = true; }
+
     if (_pendingReinit) {
         _pendingApply = true;
     } else {
@@ -539,13 +811,13 @@ void CLASS_DEVICE_E7RGB::handleFonts(AsyncWebServerRequest *request) {
 
 void CLASS_DEVICE_E7RGB::defaultConfig() {
     _config.busMode     = E7_BUS_AUTO;
-    _config.mode        = E7_MODE_WORK;
+    _config.displayMode = E7_DISP_CLOCK;
     _config.dataPin     = 16;
     _config.brightness  = 25;
     _config.colonBlink  = 1;
     _config.effect      = E7_EFFECT_MONO;
     _config.effectDir   = E7_FXDIR_TL;
-    _config.digitsColor = 0xFF0000;
+    _config.digitsColor = 0x00FF00;   // по умолчанию зелёный
     _config.digitsColor2 = 0x0000FF;
     _config.animSpeed   = 45;
     _config.colorsCount = 4;
@@ -569,6 +841,11 @@ void CLASS_DEVICE_E7RGB::defaultConfig() {
     _config.rainDurMin  = 2;
     _config.rainIntensity = 6;
     _config.rainSettleDur = 1;
+    _config.digitFlip   = E7_FLIP_NONE;
+    _config.digitFlipSpeed = E7_FLIP_SPEED_NORMAL;
+    _config.tickerText  = "";
+    _config.tickerSpeed = 160;
+    _config.tickerDirection = E7_TICKER_LEFT;
     _config.fontFile    = E7_FONT_DEFAULT;
     _config.manualText  = "0000";
 }
@@ -579,7 +856,10 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     if (core_json.jsonFileLoadDoc(CONFIG_FILE_E7RGB, doc) == false) { return false; }
 
     _config.busMode     = (uint8_t)constrain(doc["busMode"].as<int>(), E7_BUS_OFF, E7_BUS_MACRO);
-    _config.mode        = (uint8_t)constrain(doc["mode"].as<int>(), E7_MODE_WORK, E7_MODE_MANUAL);
+    // displayMode — новое поле; у старых конфигов его нет, остаётся дефолт.
+    if (doc["displayMode"].is<int>()) {
+        _config.displayMode = (uint8_t)constrain(doc["displayMode"].as<int>(), E7_DISP_CLOCK, E7_DISP_TICKER);
+    }
     _config.dataPin     = (int16_t)constrain(doc["dataPin"].as<int>(), -1, 33);
     _config.brightness  = (uint8_t)constrain(doc["brightness"].as<int>(), 0, 255);
     if (doc["colonBlink"].is<int>()) {
@@ -631,6 +911,22 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     if (doc["rainSettleDur"].is<int>()) {
         _config.rainSettleDur = (uint8_t)constrain(doc["rainSettleDur"].as<int>(), 0, 10);
     }
+    if (doc["digitFlip"].is<int>()) {
+        _config.digitFlip = (uint8_t)constrain(doc["digitFlip"].as<int>(), E7_FLIP_NONE, E7_FLIP_DOWN);
+    }
+    if (doc["digitFlipSpeed"].is<int>()) {
+        _config.digitFlipSpeed = (uint8_t)constrain(doc["digitFlipSpeed"].as<int>(),
+                                                    E7_FLIP_SPEED_SLOW, E7_FLIP_SPEED_FAST);
+    }
+    if (doc["tickerSpeed"].is<int>()) {
+        _config.tickerSpeed = (uint8_t)constrain(doc["tickerSpeed"].as<int>(),
+                                                 E7_TICKER_SPEED_MIN, E7_TICKER_SPEED_MAX);
+    }
+    if (doc["tickerDirection"].is<int>()) {
+        _config.tickerDirection = (uint8_t)constrain(doc["tickerDirection"].as<int>(),
+                                                     E7_TICKER_LEFT, E7_TICKER_RIGHT);
+    }
+    _config.tickerText = e7SanitizeTickerText(doc["tickerText"].as<String>());
 
     _config.fontFile = doc["fontFile"].as<String>();
     if (ns_device_electronica7_rgb::e7FontPathOk(_config.fontFile) == false) { _config.fontFile = E7_FONT_DEFAULT; }
@@ -638,8 +934,8 @@ bool CLASS_DEVICE_E7RGB::loadConfig() {
     _config.manualText = doc["manualText"].as<String>();
     if (_config.manualText.length() != 4) { _config.manualText = "0000"; }
 
-    DEBUGE7RGB("dataPin: %d, mode: %d, brightness: %d, font: %s\r\n",
-               _config.dataPin, _config.mode, _config.brightness, _config.fontFile.c_str());
+    DEBUGE7RGB("dataPin: %d, display: %d, brightness: %d, font: %s\r\n",
+               _config.dataPin, _config.displayMode, _config.brightness, _config.fontFile.c_str());
     return true;
 }
 
@@ -649,7 +945,13 @@ bool CLASS_DEVICE_E7RGB::saveConfig() {
     core_json.jsonFileLoadDoc(CONFIG_FILE_E7RGB, doc);
 
     doc["busMode"]     = _config.busMode;
-    doc["mode"]        = _config.mode;
+    doc.remove("mode");   // поле старого формата (режим заменён на displayMode)
+    doc["displayMode"] = _config.displayMode;
+    doc["tickerText"]  = _config.tickerText;
+    doc["tickerSpeed"] = _config.tickerSpeed;
+    doc["tickerDirection"] = _config.tickerDirection;
+    doc["digitFlip"]   = _config.digitFlip;
+    doc["digitFlipSpeed"] = _config.digitFlipSpeed;
     doc["dataPin"]     = _config.dataPin;
     doc["brightness"]  = _config.brightness;
     doc["colonBlink"]  = _config.colonBlink;
