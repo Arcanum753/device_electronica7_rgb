@@ -22,6 +22,10 @@
 #define E7_GLYPH_W        4      // ширина глифа (колонок)
 #define E7_GLYPH_H        7      // высота глифа (строк)
 
+// Бегущая строка: между символами всегда пустая колонка (для читаемости).
+#define E7_TICKER_GAP     1
+#define E7_TICKER_CHAR_W  (E7_GLYPH_W + E7_TICKER_GAP)
+
 #define E7_FONTS_DIGIT_COUNT   10   // '0'..'9'
 #define E7_FONTS_ALPHA_COUNT   26   // 'A'..'Z'
 #define E7_FONTS_SYMBOL_COUNT  9    // . , : = - % ° + пробел

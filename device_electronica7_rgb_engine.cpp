@@ -129,14 +129,15 @@ void CLASS_DEVICE_E7RGB::renderManual() {
     drawMaskFx(mask, false);
 }
 
-// Бегущая строка: каждый символ занимает E7_GLYPH_W пикселей (пробел и
-// неизвестный символ — тоже, чтобы текст не «слипался»).
+// Бегущая строка: каждый символ занимает E7_TICKER_CHAR_W пикселей
+// (глиф E7_GLYPH_W + пустая колонка E7_TICKER_GAP; пробел и неизвестный
+// символ — тоже), чтобы соседние символы не «слипались».
 void CLASS_DEVICE_E7RGB::drawTicker() {
     if (_matrix.ready() == false) { return; }
     _matrix.clear();
 
     int len = (int)_config.tickerText.length();
-    int textW = len * E7_GLYPH_W;
+    int textW = len * E7_TICKER_CHAR_W;
     int baseX = (_config.tickerDirection == E7_TICKER_RIGHT)
                 ? (_tickerOffset - textW)
                 : (E7_WIDTH - _tickerOffset);
@@ -144,7 +145,7 @@ void CLASS_DEVICE_E7RGB::drawTicker() {
     for (int i = 0; i < len; i++) {
         const uint8_t* g = _fonts.glyph(_config.tickerText.charAt(i));
         if (g == NULL) { continue; }
-        int x0 = baseX + i * E7_GLYPH_W;
+        int x0 = baseX + i * E7_TICKER_CHAR_W;
         for (int r = 0; r < E7_GLYPH_H; r++) {
             int py = (E7_HEIGHT - 1) - r;
             for (int c = 0; c < E7_GLYPH_W; c++) {
@@ -167,7 +168,7 @@ void CLASS_DEVICE_E7RGB::drawTicker() {
 void CLASS_DEVICE_E7RGB::tickerScroll() {
     int len = (int)_config.tickerText.length();
     if (len == 0) { return; }
-    int limit = len * E7_GLYPH_W + E7_WIDTH;
+    int limit = len * E7_TICKER_CHAR_W + E7_WIDTH;
 
     // Один проход (e7.show): строка доехала до конца — остаёмся на пустом
     // кадре до возврата часов, без «вылезания» первых символов снова.

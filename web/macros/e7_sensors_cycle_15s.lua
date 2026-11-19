@@ -106,7 +106,7 @@ every(30, function()
     -- скорости + 4 с (переход «часы уезжают» ~2 с и запас >1 с).
     local speed = get("e7.ticker_speed") or 160
     if speed < 10 then speed = 10 end
-    local secs = ((#it.s * 4 + 16) * speed + 999) // 1000 + 4
+    local secs = ((#it.s * 5 + 16) * speed + 999) // 1000 + 4
     if secs < 5 then secs = 5 end
 
     after(secs, function()
